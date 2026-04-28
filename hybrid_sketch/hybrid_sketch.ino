@@ -137,14 +137,23 @@ void publishState() {
   }
 }
 
-void handleDiagnosticLed() {
-  if (millis() - lastLedCycle > 1500) {
-    lastLedCycle = millis();
-    ledCycleState++;
-    if (ledCycleState > 3) ledCycleState = 0;
-    
-    setRgbLed(0, 0, 0); // Clear
+bool ledPulse = false;
 
+void handleDiagnosticLed() {
+  if (millis() - lastLedCycle > 500) {
+    lastLedCycle = millis();
+    ledPulse = !ledPulse;
+    
+    if (!ledPulse) {
+      setRgbLed(0, 0, 0); // Pulse Off
+      
+      // Advance to next state when turning off
+      ledCycleState++;
+      if (ledCycleState > 3) ledCycleState = 0;
+      return;
+    }
+
+    // Pulse On Phase
     if (ledCycleState == 0) {
       if (WiFi.status() == WL_CONNECTED) {
         if (mqttClient.connected()) {
@@ -157,23 +166,20 @@ void handleDiagnosticLed() {
       }
     } 
     else if (ledCycleState == 1) {
-      if (dogModeEnabled) {
-        setRgbLed(255, 0, 255); // Magenta (Dog Mode)
-      }
+      if (dogModeEnabled) setRgbLed(255, 0, 255); // Magenta
+      else setRgbLed(0, 0, 0);
     }
     else if (ledCycleState == 2) {
-      if (gps.speed.isValid() && gps.speed.mph() > 5.0) {
-        setRgbLed(255, 255, 0); // Yellow (Moving)
-      }
+      if (gps.speed.isValid() && gps.speed.mph() > 5.0) setRgbLed(255, 255, 0);
+      else setRgbLed(0, 0, 0);
     }
     else if (ledCycleState == 3) {
       int activeCount = 0;
       for (int i = 0; i < NUM_RELAYS; i++) {
         if (relayStates[i]) activeCount++;
       }
-      if (activeCount > 0) {
-        setRgbLed(0, 255, 255); // Cyan (Active Loads)
-      }
+      if (activeCount > 0) setRgbLed(0, 255, 255); // Cyan
+      else setRgbLed(0, 0, 0);
     }
   }
 }
@@ -206,8 +212,13 @@ void postToFirestore() {
       payload += ",\"relay" + String(i+1) + "\":{\"booleanValue\":" + String(relayStates[i] ? "true" : "false") + "}";
     }
     
-    // Add timestamp placeholder
-    payload += ",\"timestamp\":{\"timestampValue\":\"1970-01-01T00:00:00Z\"}";
+    // Add accurate epoch timestamp via NTP
+    unsigned long epoch = WiFi.getTime();
+    if (epoch > 0) {
+      payload += ",\"server_time_epoch\":{\"integerValue\":\"" + String(epoch) + "\"}";
+    } else {
+      payload += ",\"server_time_epoch\":{\"integerValue\":\"" + String(millis() / 1000) + "\"}"; // fallback
+    }
     
     payload += "}}";
 

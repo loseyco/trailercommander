@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Power, Lightbulb, Droplets, Fan, Wind, Sun, Battery, Radio, Thermometer, Droplet, Navigation, Info, X, BatteryMedium, SlidersHorizontal } from 'lucide-react';
+import { Power, Lightbulb, Droplets, Fan, Wind, Sun, Battery, Radio, Thermometer, Droplet, Navigation, Info, X, BatteryMedium, SlidersHorizontal, Edit3, Check } from 'lucide-react';
 import { initMqtt, sendCommand, fetchSensors } from './api';
 import './index.css';
 
 // Firebase & Map
 import { db } from './firebase';
 import { doc, getDoc, setDoc, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
-import { MapContainer, TileLayer, Polyline, Marker } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, CircleMarker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -19,21 +19,39 @@ let DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-const RELAYS = [
-  { id: 1, name: 'Main Power', desc: 'Relay Ch 1 (Pin 0)', icon: Power },
-  { id: 2, name: 'Interior Lights', desc: 'Relay Ch 2 (Pin 1)', icon: Lightbulb },
-  { id: 3, name: 'Exterior Lights', desc: 'Relay Ch 3 (Pin 2)', icon: Sun },
-  { id: 4, name: 'Water Pump', desc: 'Relay Ch 4 (Pin 3)', icon: Droplets },
-  { id: 5, name: 'Fridge Power', desc: 'Relay Ch 5 (Pin 4)', icon: Battery },
-  { id: 6, name: 'Top Front Vent', desc: 'Relay Ch 6 (Pin 5)', icon: Fan },
-  { id: 7, name: 'Bottom Rear Vent', desc: 'Relay Ch 7 (Pin 6)', icon: Wind },
-  { id: 8, name: 'Auxiliary', desc: 'Relay Ch 8 (Pin 7)', icon: Radio },
-];
+const DEFAULT_RELAY_CONFIG = {
+  1: { name: 'Main Power' },
+  2: { name: 'Interior Lights' },
+  3: { name: 'Exterior Lights' },
+  4: { name: 'Water Pump' },
+  5: { name: 'Fridge Power' },
+  6: { name: 'Top Front Vent' },
+  7: { name: 'Bottom Rear Vent' },
+  8: { name: 'Auxiliary' }
+};
+
+const PIN_INFO = {
+  1: 'Relay Ch 1 (Pin 0)',
+  2: 'Relay Ch 2 (Pin 1)',
+  3: 'Relay Ch 3 (Pin 2)',
+  4: 'Relay Ch 4 (Pin 3)',
+  5: 'Relay Ch 5 (Pin 4)',
+  6: 'Relay Ch 6 (Pin 5)',
+  7: 'Relay Ch 7 (Pin 6)',
+  8: 'Relay Ch 8 (Pin 7)'
+};
+
+const RELAY_ICONS = {
+  1: Power, 2: Lightbulb, 3: Sun, 4: Droplets, 
+  5: Battery, 6: Fan, 7: Wind, 8: Radio
+};
 
 function App() {
   const [relays, setRelays] = useState(
-    RELAYS.reduce((acc, relay) => ({ ...acc, [relay.id]: false }), {})
+    Object.keys(DEFAULT_RELAY_CONFIG).reduce((acc, id) => ({ ...acc, [id]: false }), {})
   );
+  const [relayConfig, setRelayConfig] = useState(DEFAULT_RELAY_CONFIG);
+  const [isEditMode, setIsEditMode] = useState(false);
   
   const [isProcessing, setIsProcessing] = useState({});
   const [connectionMode, setConnectionMode] = useState('offline'); 
@@ -47,25 +65,81 @@ function App() {
   // New State for Voltage and Maps
   const [voltageMultiplier, setVoltageMultiplier] = useState(5.0);
   const [antTrail, setAntTrail] = useState([]);
+  
+  // Last Known State Tracking
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [timeAgoStr, setTimeAgoStr] = useState('Unknown');
+
+  useEffect(() => {
+    const updateTimeStr = () => {
+      if (connectionMode === 'local' || connectionMode === 'mqtt') {
+        setTimeAgoStr('Live');
+        return;
+      }
+      if (!lastUpdated) {
+        setTimeAgoStr('Unknown');
+        return;
+      }
+      const diffMs = Date.now() - lastUpdated;
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 1) setTimeAgoStr('Just now');
+      else if (diffMins < 60) setTimeAgoStr(`${diffMins}m ago`);
+      else setTimeAgoStr(`${Math.floor(diffMins/60)}h ${diffMins%60}m ago`);
+    };
+    updateTimeStr();
+    const interval = setInterval(updateTimeStr, 10000);
+    return () => clearInterval(interval);
+  }, [lastUpdated, connectionMode]);
 
   useEffect(() => {
     // Load config from Firestore
     const loadConfig = async () => {
       try {
-        const docRef = doc(db, 'settings', 'calibration');
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setVoltageMultiplier(docSnap.data().voltageMultiplier || 5.0);
+        const calibDoc = await getDoc(doc(db, 'settings', 'calibration'));
+        if (calibDoc.exists()) {
+          setVoltageMultiplier(calibDoc.data().voltageMultiplier || 5.0);
         }
 
-        // Load Ant Trail
-        const q = query(collection(db, 'telemetry'), orderBy('__name__', 'desc'), limit(50));
+        const relayDoc = await getDoc(doc(db, 'settings', 'relays'));
+        if (relayDoc.exists()) {
+          setRelayConfig({ ...DEFAULT_RELAY_CONFIG, ...relayDoc.data() });
+        }
+
+        // Load Ant Trail & Last Known State
+        const q = query(collection(db, 'telemetry'), orderBy('server_time_epoch', 'desc'), limit(200));
         const querySnapshot = await getDocs(q);
         const trail = [];
+        let isFirst = true;
         querySnapshot.forEach((doc) => {
           const data = doc.data();
           if (data.lat && data.lng) {
              trail.push([data.lat, data.lng]);
+          }
+          if (isFirst) {
+            isFirst = false;
+            // Inject last known state into UI immediately
+            setSensors(prev => ({
+              ...prev,
+              temperature: data.temperature || prev.temperature,
+              humidity: data.humidity || prev.humidity,
+              speed_mph: data.speed_mph || prev.speed_mph,
+              raw_voltage: data.raw_voltage || prev.raw_voltage,
+              lat: data.lat || prev.lat,
+              lng: data.lng || prev.lng
+            }));
+            if (data.dog_mode !== undefined) setDogMode(data.dog_mode);
+            
+            const newStates = {};
+            for (let i = 1; i <= 8; i++) {
+              if (data[`relay${i}`] !== undefined) {
+                newStates[i] = data[`relay${i}`];
+              }
+            }
+            setRelays(prev => ({ ...prev, ...newStates }));
+            
+            if (data.server_time_epoch) {
+              setLastUpdated(data.server_time_epoch * 1000);
+            }
           }
         });
         setAntTrail(trail.reverse()); // Put in chronological order
@@ -150,6 +224,26 @@ function App() {
   const showToast = (message, mode) => {
     setToastMessage({ text: message, mode });
     setTimeout(() => setToastMessage(''), 3000);
+  };
+
+  const saveRelayConfig = async () => {
+    setIsEditMode(false);
+    try {
+      await setDoc(doc(db, 'settings', 'relays'), relayConfig);
+      showToast('Relay names saved to cloud', 'local');
+    } catch(e) {
+      showToast('Failed to save', 'danger');
+    }
+  };
+
+  const handleConfigChange = (id, field, value) => {
+    setRelayConfig(prev => ({
+      ...prev,
+      [id]: {
+        ...prev[id],
+        [field]: value
+      }
+    }));
   };
 
   const handleMultiplierChange = async (e) => {
@@ -246,14 +340,19 @@ function App() {
             </div>
           </header>
 
-          <div className="status-bar" style={{ marginTop: '1.5rem' }}>
-            <div className="status-item">
-              <div className={`indicator ${connectionMode === 'local' ? 'active' : ''}`} style={{ background: connectionMode === 'local' ? 'var(--led-local)' : '', boxShadow: connectionMode === 'local' ? '0 0 10px var(--led-local)' : ''}}></div>
-              Local API
+          <div className="status-bar" style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <div className="status-item">
+                <div className={`indicator ${connectionMode === 'local' ? 'active' : ''}`} style={{ background: connectionMode === 'local' ? 'var(--led-local)' : '', boxShadow: connectionMode === 'local' ? '0 0 10px var(--led-local)' : ''}}></div>
+                Local API
+              </div>
+              <div className="status-item">
+                <div className={`indicator ${connectionMode === 'mqtt' ? 'active' : ''}`} style={{ background: connectionMode === 'mqtt' ? 'var(--led-cloud)' : '', boxShadow: connectionMode === 'mqtt' ? '0 0 10px var(--led-cloud)' : ''}}></div>
+                Cloud Link
+              </div>
             </div>
-            <div className="status-item">
-              <div className={`indicator ${connectionMode === 'mqtt' ? 'active' : ''}`} style={{ background: connectionMode === 'mqtt' ? 'var(--led-cloud)' : '', boxShadow: connectionMode === 'mqtt' ? '0 0 10px var(--led-cloud)' : ''}}></div>
-              Cloud Link
+            <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+              Last Updated: <span style={{ color: connectionMode !== 'offline' ? 'var(--success)' : 'inherit' }}>{timeAgoStr}</span>
             </div>
           </div>
         </div>
@@ -327,44 +426,76 @@ function App() {
                 url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               />
-              {antTrail.length > 0 && <Polyline positions={antTrail} color="var(--accent)" weight={4} opacity={0.7} />}
+              {antTrail.length > 0 && <Polyline positions={antTrail} color="var(--accent)" weight={3} opacity={0.5} />}
+              {antTrail.map((pos, idx) => (
+                 <CircleMarker key={idx} center={pos} radius={3} color="var(--accent)" fillColor="var(--accent)" fillOpacity={0.8} />
+              ))}
               {(sensors.lat && sensors.lng) && <Marker position={[sensors.lat, sensors.lng]} />}
             </MapContainer>
           </div>
         </div>
 
         <div className="dashboard-right">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+             {isEditMode ? (
+                <button onClick={saveRelayConfig} style={{ background: 'var(--success)', color: '#000', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
+                  <Check size={16} /> Save Channels
+                </button>
+             ) : (
+                <button onClick={() => setIsEditMode(true)} style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid var(--glass-border)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Edit3 size={16} /> Edit Channels
+                </button>
+             )}
+          </div>
           <div className="controls-grid">
-            {RELAYS.map((relay) => {
-              const Icon = relay.icon;
-              let isOn = relays[relay.id];
+            {Object.keys(relayConfig).map((idStr) => {
+              const id = parseInt(idStr);
+              const config = relayConfig[id];
+              const Icon = RELAY_ICONS[id];
+              let isOn = relays[id];
               
-              if ((relay.id === 6 || relay.id === 7) && sensors.speed_mph > 5.0) {
+              if ((id === 6 || id === 7) && sensors.speed_mph > 5.0) {
                 isOn = false; 
               }
               
-              const processing = isProcessing[relay.id];
-              const lockedByDogMode = (relay.id === 6 || relay.id === 7) && dogMode;
+              const processing = isProcessing[id];
+              const lockedByDogMode = (id === 6 || id === 7) && dogMode;
 
               return (
-                <div key={relay.id} className="glass-card" style={{ opacity: lockedByDogMode ? 0.7 : 1 }}>
-                  <div className="card-info">
-                    <div className="icon-wrapper" style={{ color: isOn ? 'var(--led-relay)' : 'var(--text-muted)'}}>
+                <div key={id} className="glass-card" style={{ opacity: lockedByDogMode && !isEditMode ? 0.7 : 1 }}>
+                  <div className="card-info" style={{ width: '100%', paddingRight: isEditMode ? '0' : '3rem' }}>
+                    <div className="icon-wrapper" style={{ color: isOn && !isEditMode ? 'var(--led-relay)' : 'var(--text-muted)', marginBottom: isEditMode ? '0.5rem' : '0' }}>
                       <Icon size={24} />
                     </div>
-                    <div>
-                      <h3>{relay.name} {lockedByDogMode && <span style={{fontSize: '0.8rem', color: 'var(--led-dog)'}}> (Auto)</span>}</h3>
-                      <p>{relay.desc}</p>
-                    </div>
+                    {isEditMode ? (
+                      <div style={{ width: '100%' }}>
+                         <input 
+                            type="text" 
+                            className="edit-input" 
+                            value={config.name} 
+                            onChange={(e) => handleConfigChange(id, 'name', e.target.value)} 
+                         />
+                         <div className="edit-input desc" style={{border: 'none', background: 'transparent', padding: 0}}>
+                           {PIN_INFO[id]}
+                         </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <h3>{config.name} {lockedByDogMode && <span style={{fontSize: '0.8rem', color: 'var(--led-dog)'}}> (Auto)</span>}</h3>
+                        <p>{PIN_INFO[id]}</p>
+                      </div>
+                    )}
                   </div>
                   
-                  <input 
-                    type="checkbox" 
-                    className="toggle-switch" 
-                    checked={isOn}
-                    onChange={() => toggleRelay(relay.id)}
-                    disabled={processing || connectionMode === 'offline' || lockedByDogMode}
-                  />
+                  {!isEditMode && (
+                    <input 
+                      type="checkbox" 
+                      className="toggle-switch" 
+                      checked={isOn}
+                      onChange={() => toggleRelay(id)}
+                      disabled={processing || connectionMode === 'offline' || lockedByDogMode}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -441,14 +572,13 @@ function App() {
 
               <h3>8-Channel Relay (Active Low)</h3>
               <ul>
-                <li>MKR1010 Pin 0 ➔ Relay IN1 (Main Power)</li>
-                <li>MKR1010 Pin 1 ➔ Relay IN2 (Interior Lights)</li>
-                <li>MKR1010 Pin 2 ➔ Relay IN3 (Exterior Lights)</li>
-                <li>MKR1010 Pin 3 ➔ Relay IN4 (Water Pump)</li>
-                <li>MKR1010 Pin 4 ➔ Relay IN5 (Fridge)</li>
-                <li>MKR1010 Pin 5 ➔ Relay IN6 (Top Front Vent)</li>
-                <li>MKR1010 Pin 6 ➔ Relay IN7 (Bottom Rear Vent)</li>
-                <li>MKR1010 Pin 7 ➔ Relay IN8 (Auxiliary)</li>
+                {Object.keys(relayConfig).map((idStr) => {
+                  const id = parseInt(idStr);
+                  const config = relayConfig[id];
+                  return (
+                    <li key={id}>MKR1010 Pin {id-1} ➔ Relay IN{id} <b>({config.name})</b></li>
+                  );
+                })}
               </ul>
 
               <h3>I2C Sensors (SHT3x)</h3>

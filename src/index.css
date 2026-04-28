@@ -181,14 +181,33 @@ body {
 /* Glass Card */
 .glass-card {
   background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: 1.5rem;
-  padding: 1.5rem;
   backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 1.5rem;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.edit-input {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid var(--glass-border);
+  color: #fff;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 1rem;
+  width: 100%;
+  margin-bottom: 4px;
+}
+.edit-input.desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .glass-card:hover {
