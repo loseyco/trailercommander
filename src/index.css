@@ -683,3 +683,18 @@ body {
   0% { top: -5%; }
   100% { top: 105%; }
 }
+
+/* Mobile adjustments */
+@media (max-width: 767px) {
+  body { height: auto; overflow: visible; }
+  .app-container { height: auto; max-height: none; overflow: visible; padding: 0.5rem; }
+  .hud-dashboard-grid { grid-template-columns: 1fr; height: auto; }
+  .hud-dashboard-grid > div:last-child { overflow: visible; }
+  .hud-btn-grid { grid-template-columns: 1fr 1fr; }
+  .hud-top-bar { flex-direction: column; gap: 0.5rem; align-items: flex-start; position: relative; }
+  .hud-top-bar .header { position: static; transform: none; }
+  .hud-tabs { overflow-x: auto; white-space: nowrap; padding-bottom: 5px; justify-content: flex-start; width: 100%; }
+  .weather-stats { flex-wrap: wrap; gap: 1rem; }
+  .weather-stat { min-width: 40%; }
+  .security-grid { grid-template-columns: 1fr !important; height: auto !important; overflow: visible !important; }
+}
