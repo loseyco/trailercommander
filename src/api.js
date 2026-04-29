@@ -3,6 +3,7 @@ import mqtt from 'mqtt';
 const MKR1010_IP = '192.168.2.165';
 const MQTT_BROKER = 'wss://broker.hivemq.com:8884/mqtt'; // HiveMQ public WebSocket port
 const COMMAND_TOPIC = 'TrailerCommander/a076dee5/commands';
+const AUTOMATIONS_TOPIC = 'TrailerCommander/a076dee5/automations';
 
 // Initialize MQTT client
 let mqttClient = null;
@@ -93,4 +94,12 @@ export const fetchSensors = async () => {
     // Fails silently, MQTT handles fallback stream automatically
   }
   return { success: false };
+};
+
+export const publishAutomations = (rulesArray) => {
+  if (mqttClient && mqttClient.connected) {
+    mqttClient.publish(AUTOMATIONS_TOPIC, JSON.stringify(rulesArray));
+    return true;
+  }
+  return false;
 };

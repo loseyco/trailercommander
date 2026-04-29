@@ -4,6 +4,7 @@
 #include <utility/wifi_drv.h>
 #include <Wire.h>
 #include <ArduinoOTA.h>
+#include <ArduinoJson.h>
 #include "Adafruit_SHT31.h"
 #include <TinyGPS++.h>
 
@@ -20,6 +21,7 @@ int        port     = 1883;
 const char commandTopic[]  = "TrailerCommander/a076dee5/commands";
 const char stateTopic[]    = "TrailerCommander/a076dee5/state";
 const char sensorTopic[]   = "TrailerCommander/a076dee5/sensors";
+const char automationsTopic[] = "TrailerCommander/a076dee5/automations";
 
 // Relay Config
 const int NUM_RELAYS = 8;
@@ -38,6 +40,19 @@ bool dogModeEnabled = false;
 unsigned long lastLedCycle = 0;
 int ledCycleState = 0;
 unsigned long lastFirebaseUpdate = 0;
+
+struct AutomationRule {
+  bool active;
+  String sensor; // "temperature", "voltage", "speed"
+  String op;     // ">", "<", "=="
+  float value;
+  int targetRelay;
+  bool targetState;
+};
+
+const int MAX_RULES = 10;
+AutomationRule rules[MAX_RULES];
+int activeRuleCount = 0;
 
 void setup() {
   Serial.begin(9600);
@@ -80,7 +95,7 @@ void setup() {
   server.begin();
   connectToMqtt();
   
-  ArduinoOTA.begin();
+  ArduinoOTA.begin(WiFi.localIP(), "TrailerCommander", "gridpass", InternalStorage);
 }
 
 void setRgbLed(int r, int g, int b) {
@@ -93,6 +108,7 @@ void connectToMqtt() {
   if (mqttClient.connect(broker, port)) {
     mqttClient.onMessage(onMqttMessage);
     mqttClient.subscribe(commandTopic);
+    mqttClient.subscribe(automationsTopic);
   }
 }
 
@@ -283,6 +299,34 @@ void loop() {
 
   bool isMoving = gps.speed.isValid() && gps.speed.mph() > 5.0;
 
+  // Evaluate Automation Rules
+  for (int i = 0; i < activeRuleCount; i++) {
+    if (!rules[i].active) continue;
+    float currentVal = -999;
+    
+    if (rules[i].sensor == "temperature" && sensorEnabled) {
+      currentVal = (sht31.readTemperature() * 9.0 / 5.0) + 32.0;
+    } else if (rules[i].sensor == "voltage") {
+      currentVal = (analogRead(A1) / 1023.0) * 3.3 * 5.0; // 5.0 multiplier is hardware divider
+    } else if (rules[i].sensor == "speed") {
+      currentVal = gps.speed.isValid() ? gps.speed.mph() : 0.0;
+    }
+
+    if (currentVal != -999) {
+      bool conditionMet = false;
+      if (rules[i].op == ">") conditionMet = currentVal > rules[i].value;
+      else if (rules[i].op == "<") conditionMet = currentVal < rules[i].value;
+      else if (rules[i].op == "==") conditionMet = currentVal == rules[i].value;
+
+      if (conditionMet) {
+        if (relayStates[rules[i].targetRelay] != rules[i].targetState) {
+          setRelay(rules[i].targetRelay, rules[i].targetState);
+          publishState();
+        }
+      }
+    }
+  }
+
   // Firestore 60s Logger
   if (WiFi.status() == WL_CONNECTED && (millis() - lastFirebaseUpdate > 60000 || lastFirebaseUpdate == 0)) {
     lastFirebaseUpdate = millis();
@@ -387,26 +431,46 @@ void loop() {
 }
 
 void onMqttMessage(int messageSize) {
+  String topic = mqttClient.messageTopic();
   String message = "";
   while (mqttClient.available()) {
     message += (char)mqttClient.read();
   }
-  
-  if (message == "DOGMODE_ON") {
-    dogModeEnabled = true;
-    publishState();
-  } else if (message == "DOGMODE_OFF") {
-    dogModeEnabled = false;
-    publishState();
-  } else if (message.startsWith("RELAY_")) {
-    int relayNum = message.substring(6, 7).toInt();
-    if (relayNum >= 1 && relayNum <= NUM_RELAYS) {
-      if (message.endsWith("_ON")) {
-        setRelay(relayNum - 1, true);
-      } else if (message.endsWith("_OFF")) {
-        setRelay(relayNum - 1, false);
+
+  if (topic == automationsTopic) {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, message);
+    if (!error) {
+      activeRuleCount = 0;
+      JsonArray array = doc.as<JsonArray>();
+      for (JsonVariant v : array) {
+        if (activeRuleCount >= MAX_RULES) break;
+        rules[activeRuleCount].active = true;
+        rules[activeRuleCount].sensor = v["sensor"].as<String>();
+        rules[activeRuleCount].op = v["op"].as<String>();
+        rules[activeRuleCount].value = v["val"].as<float>();
+        rules[activeRuleCount].targetRelay = v["pin"].as<int>();
+        rules[activeRuleCount].targetState = v["state"].as<bool>();
+        activeRuleCount++;
       }
+    }
+  } else if (topic == commandTopic) {
+    if (message == "DOGMODE_ON") {
+      dogModeEnabled = true;
       publishState();
+    } else if (message == "DOGMODE_OFF") {
+      dogModeEnabled = false;
+      publishState();
+    } else if (message.startsWith("RELAY_")) {
+      int relayNum = message.substring(6, 7).toInt();
+      if (relayNum >= 1 && relayNum <= NUM_RELAYS) {
+        if (message.endsWith("_ON")) {
+          setRelay(relayNum - 1, true);
+        } else if (message.endsWith("_OFF")) {
+          setRelay(relayNum - 1, false);
+        }
+        publishState();
+      }
     }
   }
 }

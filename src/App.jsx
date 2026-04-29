@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Power, Lightbulb, Droplets, Fan, Wind, Sun, Battery, Radio, Thermometer, Droplet, Navigation, Info, X, BatteryMedium, SlidersHorizontal, Edit3, Check } from 'lucide-react';
-import { initMqtt, sendCommand, fetchSensors } from './api';
+import { initMqtt, sendCommand, fetchSensors, publishAutomations } from './api';
 import './index.css';
 
 // Firebase & Map
@@ -139,6 +139,10 @@ function App() {
   const [stats, setStats] = useState({ max_speed_mph: 0, high_voltage: 0, low_voltage: 99 });
   const [timeToEmpty, setTimeToEmpty] = useState(null);
 
+  // Automations & Weather
+  const [rules, setRules] = useState([]);
+  const [outsideWeather, setOutsideWeather] = useState(null);
+
   // New State for Voltage and Maps
   const [voltageMultiplier, setVoltageMultiplier] = useState(5.0);
   const [antTrail, setAntTrail] = useState([]);
@@ -169,6 +173,19 @@ function App() {
   }, [lastUpdated, connectionMode]);
 
   useEffect(() => {
+    if (sensors.lat && sensors.lng && sensors.lat !== 0) {
+      fetch(`https://api.open-meteo.com/v1/forecast?latitude=${sensors.lat}&longitude=${sensors.lng}&current_weather=true&temperature_unit=fahrenheit`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.current_weather) {
+            setOutsideWeather(data.current_weather);
+          }
+        })
+        .catch(err => console.error("Weather API Error:", err));
+    }
+  }, [sensors.lat, sensors.lng]);
+
+  useEffect(() => {
     // Load config from Firestore
     const loadConfig = async () => {
       try {
@@ -186,6 +203,12 @@ function App() {
         const statsDoc = await getDoc(doc(db, 'settings', 'stats'));
         if (statsDoc.exists()) {
            setStats(statsDoc.data());
+        }
+
+        // Load Rules
+        const rulesDoc = await getDoc(doc(db, 'settings', 'automations'));
+        if (rulesDoc.exists()) {
+           setRules(rulesDoc.data().rules || []);
         }
 
         // Load Ant Trail & Last Known State
@@ -453,6 +476,25 @@ function App() {
     speed: log.speed_mph ? parseFloat(log.speed_mph.toFixed(1)) : 0
   }));
 
+  const addRule = () => {
+    setRules([...rules, { id: Date.now(), sensor: 'temperature', op: '>', val: 80, pin: 6, state: true }]);
+  };
+  const updateRule = (id, field, value) => {
+    setRules(rules.map(r => r.id === id ? { ...r, [field]: (field === 'val' || field === 'pin' ? Number(value) : value === 'true' ? true : value === 'false' ? false : value) } : r));
+  };
+  const removeRule = (id) => {
+    setRules(rules.filter(r => r.id !== id));
+  };
+  const saveRulesToCloud = async () => {
+    try {
+      await setDoc(doc(db, 'settings', 'automations'), { rules });
+      publishAutomations(rules);
+      showToast('Automations synced to Cloud & Hardware', 'mqtt');
+    } catch(e) {
+      showToast('Failed to save automations', 'danger');
+    }
+  };
+
   return (
     <>
       <div className="background-blobs">
@@ -508,6 +550,12 @@ function App() {
                 style={{ background: 'transparent', border: 'none', color: activeTab === 'analyzer' ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.1rem', fontWeight: 'bold', cursor: 'pointer', padding: '0.5rem' }}
              >
                Pin Analyzer
+             </button>
+             <button 
+                onClick={() => setActiveTab('automations')} 
+                style={{ background: 'transparent', border: 'none', color: activeTab === 'automations' ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.1rem', fontWeight: 'bold', cursor: 'pointer', padding: '0.5rem' }}
+             >
+               Automations
              </button>
           </div>
         </div>
@@ -770,6 +818,55 @@ function App() {
 
              </div>
           </div>
+        ) : activeTab === 'automations' ? (
+          <div className="analytics-grid">
+             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h2 style={{ margin: 0 }}>On-Device Automation Engine</h2>
+                <button onClick={saveRulesToCloud} style={{ background: 'var(--success)', color: '#000', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
+                  <Check size={16} /> Sync to Hardware
+                </button>
+             </div>
+             <p style={{ color: 'var(--text-muted)' }}>Rules are executed locally on the trailer's MKR1010 chip. They will continue to run even if the dashboard is closed or internet is lost.</p>
+             
+             <div className="glass-card full-width" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {rules.map((rule, idx) => (
+                   <div key={rule.id} style={{ display: 'flex', gap: '1rem', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '1rem', borderRadius: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 'bold', color: 'var(--accent)' }}>IF</span>
+                      <select className="edit-input" value={rule.sensor} onChange={(e) => updateRule(rule.id, 'sensor', e.target.value)} style={{ width: '120px' }}>
+                         <option value="temperature">Temperature</option>
+                         <option value="voltage">Voltage</option>
+                         <option value="speed">Speed</option>
+                      </select>
+                      <select className="edit-input" value={rule.op} onChange={(e) => updateRule(rule.id, 'op', e.target.value)} style={{ width: '60px' }}>
+                         <option value=">">&gt;</option>
+                         <option value="<">&lt;</option>
+                         <option value="==">==</option>
+                      </select>
+                      <input type="number" className="edit-input" value={rule.val} onChange={(e) => updateRule(rule.id, 'val', e.target.value)} style={{ width: '80px' }} />
+                      
+                      <span style={{ fontWeight: 'bold', color: 'var(--accent)', marginLeft: '1rem' }}>THEN SET</span>
+                      <select className="edit-input" value={rule.pin} onChange={(e) => updateRule(rule.id, 'pin', e.target.value)} style={{ width: '200px' }}>
+                         {Object.keys(relayConfig).map(idStr => (
+                            <option key={idStr} value={parseInt(idStr) - 1}>{relayConfig[idStr].name} (Ch {idStr})</option>
+                         ))}
+                      </select>
+                      <span style={{ fontWeight: 'bold' }}>TO</span>
+                      <select className="edit-input" value={rule.state} onChange={(e) => updateRule(rule.id, 'state', e.target.value)} style={{ width: '100px', color: rule.state ? 'var(--success)' : '#fca5a5' }}>
+                         <option value={true}>ON</option>
+                         <option value={false}>OFF</option>
+                      </select>
+                      
+                      <button onClick={() => removeRule(rule.id)} style={{ marginLeft: 'auto', background: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', border: 'none', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}>
+                         <X size={16} />
+                      </button>
+                   </div>
+                ))}
+                
+                <button onClick={addRule} style={{ alignSelf: 'flex-start', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px dashed var(--glass-border)', padding: '1rem 2rem', borderRadius: '8px', cursor: 'pointer', marginTop: '1rem' }}>
+                  + Add New Rule
+                </button>
+             </div>
+          </div>
         ) : (
           <div className="analytics-grid">
              <div className="stats-row">
@@ -778,13 +875,15 @@ function App() {
                    <h2 style={{ margin: 0, fontSize: '2rem', color: 'var(--led-gps)' }}>{stats.max_speed_mph.toFixed(1)} <span style={{fontSize: '1rem'}}>MPH</span></h2>
                 </div>
                 <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                   <p style={{ color: 'var(--text-muted)', margin: '0 0 0.5rem 0' }}>Voltage Extremes</p>
-                   <h2 style={{ margin: 0, fontSize: '2rem', color: 'var(--success)' }}>
-                      {stats.high_voltage.toFixed(2)}v <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>High</span>
-                   </h2>
-                   <h2 style={{ margin: 0, fontSize: '1.5rem', color: '#fca5a5' }}>
-                      {(stats.low_voltage === 99 ? 0 : stats.low_voltage).toFixed(2)}v <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>Low</span>
-                   </h2>
+                   <p style={{ color: 'var(--text-muted)', margin: '0 0 0.5rem 0' }}>Weather Condition</p>
+                   {outsideWeather ? (
+                      <>
+                         <h2 style={{ margin: 0, fontSize: '2rem', color: '#93c5fd' }}>{outsideWeather.temperature.toFixed(1)}° <span style={{fontSize: '1rem'}}>Out</span></h2>
+                         <h2 style={{ margin: 0, fontSize: '1.5rem', color: '#fca5a5' }}>{sensors.temperature ? sensors.temperature.toFixed(1) : '--'}° <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>In</span></h2>
+                      </>
+                   ) : (
+                      <h2 style={{ margin: 0, fontSize: '1.5rem', color: 'var(--text-muted)' }}>GPS Syncing...</h2>
+                   )}
                 </div>
                 <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                    <p style={{ color: 'var(--text-muted)', margin: '0 0 0.5rem 0' }}>Battery Trend Estimate</p>
