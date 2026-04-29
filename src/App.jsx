@@ -661,7 +661,7 @@ function App() {
         </div>
         </>
         ) : activeTab === 'analyzer' ? (
-          <div className="analytics-grid" style={{ maxWidth: '800px', margin: '0 auto' }}>
+          <div className="analytics-grid">
              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                 <h2 style={{ margin: 0 }}>Active Pin Status</h2>
                 <select 
@@ -686,7 +686,7 @@ function App() {
                             {sensors[pin] !== undefined ? sensors[pin] : '0'} (Raw)
                          </div>
                       </div>
-                      <div style={{ flex: 1 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
                          <SparklineGraph data={telemetryLog.map(l => ({...l, [pin]: l[pin] || 0}))} dataKey={pin} color="#94a3b8" sliceCount={timeScale} />
                       </div>
                    </div>
@@ -702,7 +702,7 @@ function App() {
                             {sensors[pin] ? 'HIGH (1)' : 'LOW (0)'}
                          </div>
                       </div>
-                      <div style={{ flex: 1 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
                          <SparklineGraph data={telemetryLog.map(l => ({...l, [pin]: l[pin] ? 1 : 0}))} dataKey={pin} color="#94a3b8" isStepped={true} sliceCount={timeScale} />
                       </div>
                    </div>
@@ -722,7 +722,7 @@ function App() {
                               {isRelayOn ? 'HIGH (1)' : 'LOW (0)'}
                            </div>
                         </div>
-                        <div style={{ flex: 1 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                            <SparklineGraph data={sparkData} dataKey="relayValue" color={isRelayOn ? 'var(--led-relay)' : '#475569'} isStepped={true} sliceCount={timeScale} />
                         </div>
                      </div>
@@ -737,7 +737,7 @@ function App() {
                          {calculatedVoltage}v
                       </div>
                    </div>
-                   <div style={{ flex: 1 }}>
+                   <div style={{ flex: 1, minWidth: 0 }}>
                       <SparklineGraph data={telemetryLog.map(log => ({ ...log, raw_voltage: log.raw_voltage ? (log.raw_voltage/1023.0)*3.3*voltageMultiplier : 0 }))} dataKey="raw_voltage" color="var(--success)" sliceCount={timeScale} />
                    </div>
                 </div>
@@ -750,7 +750,7 @@ function App() {
                          {sensors.speed_mph ? sensors.speed_mph.toFixed(1) : 0} mph
                       </div>
                    </div>
-                   <div style={{ flex: 1 }}>
+                   <div style={{ flex: 1, minWidth: 0 }}>
                       <SparklineGraph data={telemetryLog} dataKey="speed_mph" color="var(--led-gps)" sliceCount={timeScale} />
                    </div>
                 </div>
@@ -763,7 +763,7 @@ function App() {
                          {sensors.temperature ? sensors.temperature.toFixed(1) : 0}°
                       </div>
                    </div>
-                   <div style={{ flex: 1 }}>
+                   <div style={{ flex: 1, minWidth: 0 }}>
                       <SparklineGraph data={telemetryLog} dataKey="temperature" color="#fca5a5" sliceCount={timeScale} />
                    </div>
                 </div>
