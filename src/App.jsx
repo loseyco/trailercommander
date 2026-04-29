@@ -736,7 +736,7 @@ function App() {
       <div className="app-container">
                 {/* HUD Top Bar */}
         <div className="hud-top-bar">
-          <div style={{ display: 'flex', gap: '1rem' }}>
+          <div className="top-bar-indicators">
             <div className="status-item">
               <div className={`indicator ${connectionMode === 'local' ? 'active' : ''}`}></div> Local API
             </div>
@@ -744,7 +744,7 @@ function App() {
               <div className={`indicator ${connectionMode === 'mqtt' ? 'active' : ''}`}></div> Cloud Link
             </div>
           </div>
-          <div className="header" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', margin: 0 }}>
+          <div className="header">
              <h1 style={{ fontSize: '1.2rem', margin: 0 }}>TrailerCommander</h1>
           </div>
           <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
@@ -846,7 +846,7 @@ function App() {
                {/* Quick Modes */}
                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem', background: 'rgba(15, 23, 42, 0.5)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
                  <h2 style={{ fontFamily: 'var(--font-mono)', fontSize: '1rem', margin: 0, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Automation Modes</h2>
-                 <div style={{ display: 'flex', gap: '0.5rem' }}>
+                 <div className="automation-modes-grid">
                    <button className="hud-action-btn success" onClick={() => executeMacro('camp')} style={{ flex: 1 }}><Fan size={16} /> Camp</button>
                    <button className="hud-action-btn" onClick={() => executeMacro('tow')} style={{ flex: 1, background: 'rgba(245, 158, 11, 0.2)', color: '#f59e0b', borderColor: '#f59e0b' }}><Navigation size={16} /> Tow</button>
                    <button className="hud-action-btn" onClick={() => executeMacro('storage')} style={{ flex: 1, background: 'rgba(244, 63, 94, 0.2)', color: '#f43f5e', borderColor: '#f43f5e' }}><Power size={16} /> Storage</button>
