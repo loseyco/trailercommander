@@ -422,3 +422,10 @@ body {
 .icon-btn:hover {
   color: var(--text-main);
 }
+.analytics-grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; width: 100%; }
+.stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; }
+.full-width { width: 100%; }
+.bottom-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+@media (max-width: 768px) { .bottom-row { grid-template-columns: 1fr; } }
+.pin { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #94a3b8; }
+.dot { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 5px currentColor; }

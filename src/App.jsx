@@ -6,11 +6,12 @@ import './index.css';
 // Firebase & Map
 import { db } from './firebase';
 import { doc, getDoc, setDoc, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
-import { MapContainer, TileLayer, Polyline, Marker, CircleMarker } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, CircleMarker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 let DefaultIcon = L.icon({
     iconUrl: icon,
@@ -46,6 +47,48 @@ const RELAY_ICONS = {
   5: Battery, 6: Fan, 7: Wind, 8: Radio
 };
 
+function MapUpdater({ center }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center && center[0] && center[1]) {
+      map.setView(center, map.getZoom());
+    }
+  }, [center, map]);
+  return null;
+}
+
+function MKR1010Diag({ relays, sensors }) {
+  const pinStatus = (id) => relays[id] ? 'var(--led-relay)' : '#334155';
+  
+  return (
+    <div style={{ position: 'relative', width: '200px', height: '350px', background: '#111827', border: '2px solid #334155', borderRadius: '12px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', padding: '20px 0', boxShadow: 'inset 0 0 10px rgba(0,0,0,0.5)' }}>
+       {/* Left Pins */}
+       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingLeft: '5px' }}>
+          <div className="pin"><span style={{color: '#fca5a5', width: '40px'}}>Bat</span> <div className="dot" style={{background: 'var(--success)'}}></div></div>
+          <div className="pin"><span style={{width: '40px'}}>0</span> <div className="dot" style={{background: pinStatus(1), boxShadow: `0 0 8px ${pinStatus(1)}`}}></div></div>
+          <div className="pin"><span style={{width: '40px'}}>1</span> <div className="dot" style={{background: pinStatus(2), boxShadow: `0 0 8px ${pinStatus(2)}`}}></div></div>
+          <div className="pin"><span style={{width: '40px'}}>2</span> <div className="dot" style={{background: pinStatus(3), boxShadow: `0 0 8px ${pinStatus(3)}`}}></div></div>
+          <div className="pin"><span style={{width: '40px'}}>3</span> <div className="dot" style={{background: pinStatus(4), boxShadow: `0 0 8px ${pinStatus(4)}`}}></div></div>
+          <div className="pin"><span style={{width: '40px'}}>4</span> <div className="dot" style={{background: pinStatus(5), boxShadow: `0 0 8px ${pinStatus(5)}`}}></div></div>
+          <div className="pin"><span style={{width: '40px'}}>5</span> <div className="dot" style={{background: pinStatus(6), boxShadow: `0 0 8px ${pinStatus(6)}`}}></div></div>
+          <div className="pin"><span style={{width: '40px'}}>6</span> <div className="dot" style={{background: pinStatus(7), boxShadow: `0 0 8px ${pinStatus(7)}`}}></div></div>
+          <div className="pin"><span style={{width: '40px'}}>7</span> <div className="dot" style={{background: pinStatus(8), boxShadow: `0 0 8px ${pinStatus(8)}`}}></div></div>
+       </div>
+       <div style={{ color: '#fff', fontWeight: 'bold', letterSpacing: '2px', writingMode: 'vertical-rl', textAlign: 'center' }}>
+          MKR WIFI 1010
+       </div>
+       {/* Right Pins */}
+       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '5px', textAlign: 'right' }}>
+          <div className="pin"><div className="dot" style={{background: '#93c5fd'}}></div> <span style={{width: '60px'}}>VIN</span></div>
+          <div className="pin"><div className="dot" style={{background: 'var(--led-gps)', boxShadow: '0 0 8px var(--led-gps)'}}></div> <span style={{width: '60px'}}>13 (TX)</span></div>
+          <div className="pin"><div className="dot" style={{background: 'var(--led-gps)', boxShadow: '0 0 8px var(--led-gps)'}}></div> <span style={{width: '60px'}}>14 (RX)</span></div>
+          <div className="pin"><div className="dot" style={{background: '#fca5a5', boxShadow: '0 0 8px #fca5a5'}}></div> <span style={{width: '60px'}}>12 (SCL)</span></div>
+          <div className="pin"><div className="dot" style={{background: '#fca5a5', boxShadow: '0 0 8px #fca5a5'}}></div> <span style={{width: '60px'}}>11 (SDA)</span></div>
+       </div>
+    </div>
+  );
+}
+
 function App() {
   const [relays, setRelays] = useState(
     Object.keys(DEFAULT_RELAY_CONFIG).reduce((acc, id) => ({ ...acc, [id]: false }), {})
@@ -61,6 +104,12 @@ function App() {
   const [dogMode, setDogMode] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [showCalibration, setShowCalibration] = useState(false);
+
+  // Tabs & Analytics
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [telemetryLog, setTelemetryLog] = useState([]);
+  const [stats, setStats] = useState({ max_speed_mph: 0, high_voltage: 0, low_voltage: 99 });
+  const [timeToEmpty, setTimeToEmpty] = useState(null);
 
   // New State for Voltage and Maps
   const [voltageMultiplier, setVoltageMultiplier] = useState(5.0);
@@ -105,13 +154,21 @@ function App() {
           setRelayConfig({ ...DEFAULT_RELAY_CONFIG, ...relayDoc.data() });
         }
 
+        // Load Stats
+        const statsDoc = await getDoc(doc(db, 'settings', 'stats'));
+        if (statsDoc.exists()) {
+           setStats(statsDoc.data());
+        }
+
         // Load Ant Trail & Last Known State
         const q = query(collection(db, 'telemetry'), orderBy('server_time_epoch', 'desc'), limit(200));
         const querySnapshot = await getDocs(q);
         const trail = [];
+        const logs = [];
         let isFirst = true;
         querySnapshot.forEach((doc) => {
           const data = doc.data();
+          logs.push(data);
           if (data.lat && data.lng) {
              trail.push([data.lat, data.lng]);
           }
@@ -143,6 +200,29 @@ function App() {
           }
         });
         setAntTrail(trail.reverse()); // Put in chronological order
+        setTelemetryLog(logs);
+        
+        // Calculate Battery Derivative
+        if (logs.length >= 2) {
+           const oldest = logs[logs.length - 1];
+           const newest = logs[0];
+           if (oldest.server_time_epoch && newest.server_time_epoch && newest.server_time_epoch > oldest.server_time_epoch) {
+              const dtHrs = (newest.server_time_epoch - oldest.server_time_epoch) / 3600.0;
+              const dV = ((newest.raw_voltage || 0) - (oldest.raw_voltage || 0)) / 1023.0 * 3.3 * (calibDoc.exists() ? calibDoc.data().voltageMultiplier : 5.0);
+              
+              if (dtHrs > 0 && Math.abs(dV) > 0.05) {
+                 const rate = dV / dtHrs; // volts per hour
+                 const currentV = ((newest.raw_voltage || 0) / 1023.0) * 3.3 * (calibDoc.exists() ? calibDoc.data().voltageMultiplier : 5.0);
+                 if (rate < 0) {
+                    const hrsLeft = (currentV - 10.5) / Math.abs(rate);
+                    setTimeToEmpty(hrsLeft > 0 ? hrsLeft : 0);
+                 } else {
+                    const hrsToFull = (14.2 - currentV) / rate;
+                    setTimeToEmpty(hrsToFull > 0 ? -hrsToFull : 0); // negative means charging
+                 }
+              }
+           }
+        }
       } catch (e) {
         console.error("Firebase load error", e);
       }
@@ -172,6 +252,26 @@ function App() {
           lat: sensorData.lat !== undefined ? sensorData.lat : prev.lat,
           lng: sensorData.lng !== undefined ? sensorData.lng : prev.lng,
         }));
+        
+        // Update Stats if hit
+        setStats(prevStats => {
+           let changed = false;
+           let newStats = { ...prevStats };
+           if (sensorData.speed_mph !== undefined && sensorData.speed_mph > newStats.max_speed_mph) {
+              newStats.max_speed_mph = sensorData.speed_mph;
+              changed = true;
+           }
+           if (sensorData.raw_voltage !== undefined) {
+              const v = (sensorData.raw_voltage / 1023.0) * 3.3 * voltageMultiplier;
+              if (v > newStats.high_voltage) { newStats.high_voltage = v; changed = true; }
+              if (v < newStats.low_voltage || newStats.low_voltage === 0) { newStats.low_voltage = v; changed = true; }
+           }
+           if (changed) {
+              setDoc(doc(db, 'settings', 'stats'), newStats);
+           }
+           return newStats;
+        });
+
         if (sensorData.dog_mode !== undefined) {
           setDogMode(sensorData.dog_mode === 'on');
         }
@@ -318,6 +418,12 @@ function App() {
 
   const calculatedVoltage = ((sensors.raw_voltage / 1023.0) * 3.3 * voltageMultiplier).toFixed(2);
   const mapCenter = (sensors.lat && sensors.lng) ? [sensors.lat, sensors.lng] : (antTrail.length > 0 ? antTrail[antTrail.length - 1] : [39.8283, -98.5795]);
+  
+  const chartData = [...telemetryLog].reverse().map(log => ({
+    time: log.server_time_epoch ? new Date(log.server_time_epoch * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '',
+    voltage: log.raw_voltage ? parseFloat(((log.raw_voltage/1023.0)*3.3*voltageMultiplier).toFixed(2)) : 0,
+    speed: log.speed_mph ? parseFloat(log.speed_mph.toFixed(1)) : 0
+  }));
 
   return (
     <>
@@ -352,12 +458,29 @@ function App() {
               </div>
             </div>
             <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              Last Updated: <span style={{ color: connectionMode !== 'offline' ? 'var(--success)' : 'inherit' }}>{timeAgoStr}</span>
+              Last Updated: <span style={{ color: connectionMode !== 'offline' ? 'var(--success)' : 'inherit' }}>{connectionMode !== 'offline' ? 'Live' : timeAgoStr}</span>
             </div>
+          </div>
+          
+          <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.5rem' }}>
+             <button 
+                onClick={() => setActiveTab('dashboard')} 
+                style={{ background: 'transparent', border: 'none', color: activeTab === 'dashboard' ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.1rem', fontWeight: 'bold', cursor: 'pointer', padding: '0.5rem' }}
+             >
+               Command Center
+             </button>
+             <button 
+                onClick={() => setActiveTab('logs')} 
+                style={{ background: 'transparent', border: 'none', color: activeTab === 'logs' ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.1rem', fontWeight: 'bold', cursor: 'pointer', padding: '0.5rem' }}
+             >
+               Analytics Log
+             </button>
           </div>
         </div>
 
-        <div className="dashboard-left">
+        {activeTab === 'dashboard' ? (
+          <>
+            <div className="dashboard-left">
           <div className="sensor-dashboard glass-card" style={{ flexWrap: 'wrap', gap: '1rem', justifyContent: 'space-around' }}>
             <div className="sensor-item" style={{ width: '45%' }}>
               <div className="icon-wrapper" style={{ color: '#fca5a5' }}>
@@ -421,10 +544,11 @@ function App() {
 
           {/* GPS Map Widget */}
           <div className="glass-card" style={{ display: 'block', padding: 0, overflow: 'hidden', height: '250px' }}>
-            <MapContainer center={mapCenter} zoom={13} style={{ height: '100%', width: '100%', background: '#1e293b' }}>
+            <MapContainer center={mapCenter} zoom={15} style={{ height: '100%', width: '100%', background: '#1e293b' }}>
+              <MapUpdater center={mapCenter} />
               <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
               />
               {antTrail.length > 0 && <Polyline positions={antTrail} color="var(--accent)" weight={3} opacity={0.5} />}
               {antTrail.map((pos, idx) => (
@@ -501,6 +625,76 @@ function App() {
             })}
           </div>
         </div>
+        </>
+        ) : (
+          <div className="analytics-grid">
+             <div className="stats-row">
+                <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                   <p style={{ color: 'var(--text-muted)', margin: '0 0 0.5rem 0' }}>All-Time Max Speed</p>
+                   <h2 style={{ margin: 0, fontSize: '2rem', color: 'var(--led-gps)' }}>{stats.max_speed_mph.toFixed(1)} <span style={{fontSize: '1rem'}}>MPH</span></h2>
+                </div>
+                <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                   <p style={{ color: 'var(--text-muted)', margin: '0 0 0.5rem 0' }}>Voltage Extremes</p>
+                   <h2 style={{ margin: 0, fontSize: '2rem', color: 'var(--success)' }}>
+                      {stats.high_voltage.toFixed(2)}v <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>High</span>
+                   </h2>
+                   <h2 style={{ margin: 0, fontSize: '1.5rem', color: '#fca5a5' }}>
+                      {(stats.low_voltage === 99 ? 0 : stats.low_voltage).toFixed(2)}v <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>Low</span>
+                   </h2>
+                </div>
+                <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                   <p style={{ color: 'var(--text-muted)', margin: '0 0 0.5rem 0' }}>Battery Trend Estimate</p>
+                   {timeToEmpty === null ? (
+                      <h2 style={{ margin: 0, fontSize: '2rem', color: 'var(--text-muted)' }}>Calculating...</h2>
+                   ) : timeToEmpty < 0 ? (
+                      <h2 style={{ margin: 0, fontSize: '2rem', color: 'var(--success)' }}>Charging <span style={{fontSize:'1rem'}}>({Math.abs(timeToEmpty).toFixed(1)}h to full)</span></h2>
+                   ) : (
+                      <h2 style={{ margin: 0, fontSize: '2rem', color: '#fca5a5' }}>{timeToEmpty.toFixed(1)}h <span style={{fontSize:'1rem'}}>to empty</span></h2>
+                   )}
+                </div>
+             </div>
+
+             <div className="glass-card full-width" style={{ display: 'block' }}>
+                <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Live Telemetry Graph</h3>
+                <div style={{ width: '100%', height: 300 }}>
+                   <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData}>
+                         <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                         <XAxis dataKey="time" stroke="#94a3b8" />
+                         <YAxis yAxisId="left" stroke="var(--success)" domain={['dataMin - 1', 'dataMax + 1']} />
+                         <YAxis yAxisId="right" orientation="right" stroke="var(--led-gps)" />
+                         <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+                         <Line yAxisId="left" type="monotone" dataKey="voltage" stroke="var(--success)" strokeWidth={2} dot={false} name="Voltage (V)" />
+                         <Line yAxisId="right" type="monotone" dataKey="speed" stroke="var(--led-gps)" strokeWidth={2} dot={false} name="Speed (MPH)" />
+                      </LineChart>
+                   </ResponsiveContainer>
+                </div>
+             </div>
+
+             <div className="bottom-row">
+                <div className="glass-card" style={{ display: 'block' }}>
+                   <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Hardware Diagnostics</h3>
+                   <MKR1010Diag relays={relays} sensors={sensors} />
+                </div>
+                <div className="glass-card" style={{ display: 'block' }}>
+                   <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Telemetry Feed Log</h3>
+                   <div style={{ maxHeight: '350px', overflowY: 'auto', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', padding: '1rem' }}>
+                      {telemetryLog.map((log, i) => (
+                         <div key={i} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--glass-border)', padding: '0.5rem 0', fontSize: '0.9rem' }}>
+                            <div style={{ color: 'var(--text-muted)' }}>
+                               {log.server_time_epoch ? new Date(log.server_time_epoch * 1000).toLocaleString() : 'Unknown Time'}
+                            </div>
+                            <div>
+                               <span style={{ color: 'var(--led-gps)', marginRight: '1rem' }}>{log.speed_mph ? log.speed_mph.toFixed(1) : 0} mph</span>
+                               <span style={{ color: 'var(--success)' }}>{log.raw_voltage ? ((log.raw_voltage/1023.0)*3.3*voltageMultiplier).toFixed(2) : 0}v</span>
+                            </div>
+                         </div>
+                      ))}
+                   </div>
+                </div>
+             </div>
+          </div>
+        )}
       </div>
 
       <div className={`toast ${toastMessage ? 'show' : ''} ${toastMessage.mode ? 'mode-' + toastMessage.mode : ''}`}>
