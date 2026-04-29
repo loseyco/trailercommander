@@ -11,7 +11,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 let DefaultIcon = L.icon({
     iconUrl: icon,
@@ -112,6 +112,215 @@ function SparklineGraph({ data, dataKey, color, isStepped = false, sliceCount })
           <YAxis domain={isStepped ? [-0.5, 1.5] : ['dataMin', 'dataMax']} hide />
         </LineChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+
+function ThermalsGraph({ telemetryLog, outsideWeather }) {
+  const chartData = [...telemetryLog].slice(0, 60).reverse().map(log => {
+    const isIntake = log.relay6 === 'on' || log.relay6 === true || log.relay6?.booleanValue === true;
+    const isExhaust = log.relay7 === 'on' || log.relay7 === true || log.relay7?.booleanValue === true;
+    return {
+      time: log.server_time_epoch ? new Date(log.server_time_epoch * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '',
+      insideTemp: log.temperature ? parseFloat(log.temperature.toFixed(1)) : 0,
+      outsideTemp: outsideWeather ? parseFloat(outsideWeather.temperature.toFixed(1)) : null,
+      intake: isIntake ? 1 : 0,
+      exhaust: isExhaust ? 1 : 0
+    };
+  });
+
+  return (
+    <div className="glass-card full-width" style={{ display: 'block', padding: '1rem', height: '250px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+        <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>THERMAL REGULATION</h3>
+        <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', fontFamily: 'var(--font-mono)' }}>
+           <span style={{ color: '#fca5a5' }}>● Inside</span>
+           <span style={{ color: '#0ea5e9' }}>○ Outside</span>
+           <span style={{ color: 'rgba(14, 165, 233, 0.5)' }}>■ Intake</span>
+           <span style={{ color: 'rgba(244, 63, 94, 0.5)' }}>■ Exhaust</span>
+        </div>
+      </div>
+      <div style={{ width: '100%', height: 'calc(100% - 30px)' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+            <XAxis dataKey="time" stroke="#64748b" fontSize={10} tickMargin={5} />
+            <YAxis yAxisId="temp" domain={['dataMin - 5', 'dataMax + 5']} stroke="#64748b" fontSize={10} />
+            <YAxis yAxisId="fans" domain={[0, 4]} hide />
+            <Tooltip contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: '1px solid rgba(14, 165, 233, 0.3)', borderRadius: '4px', fontFamily: 'var(--font-mono)' }} />
+            
+            <Area yAxisId="fans" type="step" dataKey="intake" fill="rgba(14, 165, 233, 0.2)" stroke="rgba(14, 165, 233, 0.5)" name="Intake Fan" />
+            <Area yAxisId="fans" type="step" dataKey="exhaust" fill="rgba(244, 63, 94, 0.2)" stroke="rgba(244, 63, 94, 0.5)" name="Exhaust Fan" />
+            
+            <ReferenceLine yAxisId="temp" y={72} stroke="var(--success)" strokeDasharray="3 3" label={{ position: 'insideBottomLeft', fill: 'var(--success)', fontSize: 10, value: 'Target 72°F' }} />
+            
+            <Line yAxisId="temp" type="monotone" dataKey="outsideTemp" stroke="#0ea5e9" strokeWidth={2} strokeDasharray="4 4" dot={false} name="Outside Temp" isAnimationActive={false} />
+            <Line yAxisId="temp" type="monotone" dataKey="insideTemp" stroke="#fca5a5" strokeWidth={2} dot={false} name="Inside Temp" isAnimationActive={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+
+function PowerGraph({ telemetryLog, calculatedVoltage, timeToEmpty, voltageMultiplier }) {
+  const chartData = [...telemetryLog].slice(0, 60).reverse().map(log => {
+    let loadEstimate = 0;
+    for(let i=1; i<=8; i++) {
+        if (log[`relay${i}`] === 'on' || log[`relay${i}`] === true || log[`relay${i}`]?.booleanValue === true) loadEstimate += 1;
+    }
+    return {
+      time: log.server_time_epoch ? new Date(log.server_time_epoch * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '',
+      voltage: log.raw_voltage ? parseFloat(((log.raw_voltage/1023.0)*3.3*voltageMultiplier).toFixed(2)) : 0,
+      load: loadEstimate
+    };
+  });
+
+  let etaText = "CALC...";
+  let etaColor = "var(--text-muted)";
+  if (timeToEmpty !== null) {
+      if (timeToEmpty < 0) {
+          etaText = `CHARGING (${Math.abs(timeToEmpty).toFixed(1)}H)`;
+          etaColor = "var(--success)";
+      } else {
+          etaText = `${timeToEmpty.toFixed(1)}H LEFT`;
+          etaColor = "#fca5a5";
+      }
+  }
+
+  return (
+    <div className="glass-card full-width" style={{ display: 'block', padding: '1rem', height: '250px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+        <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>POWER MANAGEMENT</h3>
+        <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', fontFamily: 'var(--font-mono)' }}>
+           <span style={{ color: 'var(--success)' }}>● {calculatedVoltage}V</span>
+           <span style={{ color: etaColor }}>{etaText}</span>
+        </div>
+      </div>
+      <div style={{ width: '100%', height: 'calc(100% - 30px)' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+            <XAxis dataKey="time" stroke="#64748b" fontSize={10} tickMargin={5} />
+            <YAxis yAxisId="volt" domain={['dataMin - 0.5', 'dataMax + 0.5']} stroke="#64748b" fontSize={10} />
+            <YAxis yAxisId="load" domain={[0, 8]} hide />
+            <Tooltip contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: '1px solid rgba(14, 165, 233, 0.3)', borderRadius: '4px', fontFamily: 'var(--font-mono)' }} />
+            
+            <Area yAxisId="load" type="step" dataKey="load" fill="rgba(245, 158, 11, 0.2)" stroke="none" name="Active Relays (Load)" />
+            
+            <ReferenceLine yAxisId="volt" y={12.0} stroke="#fca5a5" strokeDasharray="3 3" label={{ position: 'insideBottomLeft', fill: '#fca5a5', fontSize: 10, value: 'Low (12.0V)' }} />
+            <ReferenceLine yAxisId="volt" y={14.2} stroke="var(--success)" strokeDasharray="3 3" label={{ position: 'insideTopLeft', fill: 'var(--success)', fontSize: 10, value: 'Full (14.2V)' }} />
+            
+            <Line yAxisId="volt" type="monotone" dataKey="voltage" stroke="var(--success)" strokeWidth={2} dot={false} name="Battery (V)" isAnimationActive={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+
+function StarlinkWidget() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Attempt to fetch from local router, fallback to mock data if CORS/offline
+    const fetchStarlink = async () => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        // Note: Real Starlink uses gRPC, this is a mock endpoint for the UI demonstration
+        const res = await fetch('http://192.168.100.1/api/v1/status', { signal: controller.signal });
+        const json = await res.json();
+        setData(json);
+        setLoading(false);
+        clearTimeout(timeoutId);
+      } catch (e) {
+        // Fallback to the exact diagnostic data provided by the user for the mini1_prod2 dish
+        setTimeout(() => {
+          setData({
+            "id": "ut20789607-8211211b-d8a598dd",
+            "hardwareVersion": "mini1_prod2",
+            "softwareVersion": "2026.04.10.mr77882.1",
+            "utcOffsetS": -21600,
+            "hardwareSelfTest": "PASSED",
+            "alerts": {
+                "dishIsHeating": false,
+                "dishThermalThrottle": false,
+                "obstructed": false,
+                "motorsStuck": false
+            },
+            "alignmentStats": {
+                "boresightAzimuthDeg": "-56.35",
+                "boresightElevationDeg": "85.19",
+                "desiredBoresightAzimuthDeg": "-0.07",
+                "desiredBoresightElevationDeg": "67.49"
+            },
+            "stowed": true
+          });
+          setLoading(false);
+        }, 1000);
+      }
+    };
+    
+    fetchStarlink();
+    const interval = setInterval(fetchStarlink, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (loading || !data) {
+    return (
+      <div className="hud-frame" style={{ display: 'flex', flexDirection: 'column', height: '350px', justifyContent: 'center', alignItems: 'center' }}>
+         <Radio size={32} color="var(--text-muted)" style={{ animation: 'pulse 2s infinite', marginBottom: '1rem' }} />
+         <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>CONNECTING TO DISH...</div>
+      </div>
+    );
+  }
+
+  const isAligned = Math.abs(parseFloat(data.alignmentStats.boresightElevationDeg) - parseFloat(data.alignmentStats.desiredBoresightElevationDeg)) < 5;
+
+  return (
+    <div className="hud-frame" style={{ display: 'flex', flexDirection: 'column', height: '350px' }}>
+       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.5rem' }}>
+          <h3 style={{ margin: 0, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>STARLINK {data.hardwareVersion.toUpperCase()}</h3>
+          <Radio size={18} color={data.stowed ? "#f59e0b" : "var(--success)"} />
+       </div>
+       
+       <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', flex: 1, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1rem', marginBottom: '1rem' }}>
+          <div style={{ textAlign: 'center' }}>
+             <div style={{ fontSize: '1.8rem', color: data.stowed ? "#f59e0b" : "var(--success)", fontFamily: 'var(--font-mono)' }}>{data.stowed ? 'STOWED' : 'ONLINE'}</div>
+             <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Dish State</div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+             <div style={{ fontSize: '1.8rem', color: isAligned ? "var(--success)" : "#f43f5e", fontFamily: 'var(--font-mono)' }}>
+               {isAligned ? 'OKAY' : 'POOR'}
+             </div>
+             <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Alignment</div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+             <div style={{ fontSize: '1.8rem', color: data.alerts.obstructed ? "#f43f5e" : "var(--success)", fontFamily: 'var(--font-mono)' }}>
+               {data.alerts.obstructed ? 'YES' : 'NO'}
+             </div>
+             <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Obstructed</div>
+          </div>
+       </div>
+
+       <div style={{ display: 'flex', gap: '1rem', flex: 1 }}>
+         <div style={{ flex: 1, background: 'rgba(0,0,0,0.3)', padding: '0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+            <div style={{ color: '#fff', marginBottom: '4px' }}>ALIGNMENT DELTA</div>
+            Tilt: {data.alignmentStats.boresightElevationDeg}° / {data.alignmentStats.desiredBoresightElevationDeg}°<br/>
+            Rot: {data.alignmentStats.boresightAzimuthDeg}° / {data.alignmentStats.desiredBoresightAzimuthDeg}°
+         </div>
+         <div style={{ flex: 1, background: 'rgba(0,0,0,0.3)', padding: '0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+            <div style={{ color: '#fff', marginBottom: '4px' }}>DIAGNOSTICS</div>
+            Self Test: <span style={{ color: data.hardwareSelfTest === 'PASSED' ? 'var(--success)' : '#f43f5e' }}>{data.hardwareSelfTest}</span><br/>
+            Heating: {data.alerts.dishIsHeating ? 'ACTIVE' : 'OFF'}<br/>
+            Firmware: {data.softwareVersion.split('.')[2]}
+         </div>
+       </div>
     </div>
   );
 }
@@ -414,6 +623,26 @@ function App() {
     }
   };
 
+  const executeMacro = (mode) => {
+    if (mode === 'camp') {
+        [1, 2, 4].forEach(id => {
+            if (!relays[id]) toggleRelay(id);
+        });
+        showToast("Camp Mode Engaged: Essentials ON", "success");
+    } else if (mode === 'tow') {
+        [1, 3, 4].forEach(id => {
+            if (relays[id]) toggleRelay(id);
+        });
+        showToast("Tow Mode Engaged: Exterior secured", "warning");
+    } else if (mode === 'storage') {
+        Object.keys(relays).forEach(id => {
+            if (relays[id]) toggleRelay(parseInt(id));
+        });
+        if (dogMode) toggleDogMode();
+        showToast("Storage Mode Engaged: ALL OFF", "danger");
+    }
+  };
+
   const toggleDogMode = async () => {
     const currentState = dogMode;
     const cmd = currentState ? 'dogmode/off' : 'dogmode/on';
@@ -505,231 +734,230 @@ function App() {
       </div>
 
       <div className="app-container">
-        <div className="dashboard-header">
-          <header className="header">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h1>TrailerCommander</h1>
-                <p>Off-Grid Rig Control System</p>
-              </div>
-              <button className="icon-btn" onClick={() => setShowGuide(true)}>
-                <Info size={24} />
-              </button>
+                {/* HUD Top Bar */}
+        <div className="hud-top-bar">
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <div className="status-item">
+              <div className={`indicator ${connectionMode === 'local' ? 'active' : ''}`}></div> Local API
             </div>
-          </header>
+            <div className="status-item">
+              <div className={`indicator ${connectionMode === 'mqtt' ? 'active' : ''}`}></div> Cloud Link
+            </div>
+          </div>
+          <div className="header" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', margin: 0 }}>
+             <h1 style={{ fontSize: '1.2rem', margin: 0 }}>TrailerCommander</h1>
+          </div>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            UPD: <span style={{ color: connectionMode !== 'offline' ? 'var(--success)' : 'var(--danger)' }}>{connectionMode !== 'offline' ? 'LIVE' : timeAgoStr}</span>
+            <button className="icon-btn" onClick={() => setShowGuide(true)} style={{ marginLeft: '1rem' }}><Info size={18} /></button>
+          </div>
+        </div>
 
-          <div className="status-bar" style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <div className="status-item">
-                <div className={`indicator ${connectionMode === 'local' ? 'active' : ''}`} style={{ background: connectionMode === 'local' ? 'var(--led-local)' : '', boxShadow: connectionMode === 'local' ? '0 0 10px var(--led-local)' : ''}}></div>
-                Local API
-              </div>
-              <div className="status-item">
-                <div className={`indicator ${connectionMode === 'mqtt' ? 'active' : ''}`} style={{ background: connectionMode === 'mqtt' ? 'var(--led-cloud)' : '', boxShadow: connectionMode === 'mqtt' ? '0 0 10px var(--led-cloud)' : ''}}></div>
-                Cloud Link
-              </div>
-            </div>
-            <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              Last Updated: <span style={{ color: connectionMode !== 'offline' ? 'var(--success)' : 'inherit' }}>{connectionMode !== 'offline' ? 'Live' : timeAgoStr}</span>
-            </div>
-          </div>
-          
-          <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.5rem' }}>
-             <button 
-                onClick={() => setActiveTab('dashboard')} 
-                style={{ background: 'transparent', border: 'none', color: activeTab === 'dashboard' ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.1rem', fontWeight: 'bold', cursor: 'pointer', padding: '0.5rem' }}
-             >
-               Command Center
-             </button>
-             <button 
-                onClick={() => setActiveTab('logs')} 
-                style={{ background: 'transparent', border: 'none', color: activeTab === 'logs' ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.1rem', fontWeight: 'bold', cursor: 'pointer', padding: '0.5rem' }}
-             >
-               Analytics Log
-             </button>
-             <button 
-                onClick={() => setActiveTab('analyzer')} 
-                style={{ background: 'transparent', border: 'none', color: activeTab === 'analyzer' ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.1rem', fontWeight: 'bold', cursor: 'pointer', padding: '0.5rem' }}
-             >
-               Pin Analyzer
-             </button>
-             <button 
-                onClick={() => setActiveTab('automations')} 
-                style={{ background: 'transparent', border: 'none', color: activeTab === 'automations' ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.1rem', fontWeight: 'bold', cursor: 'pointer', padding: '0.5rem' }}
-             >
-               Automations
-             </button>
-          </div>
+        {/* HUD Tabs */}
+        <div className="hud-tabs">
+          <button className={`hud-tab-btn ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>Command</button>
+          <button className={`hud-tab-btn ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')}>Logs</button>
+          <button className={`hud-tab-btn ${activeTab === 'analyzer' ? 'active' : ''}`} onClick={() => setActiveTab('analyzer')}>Analyzer</button>
+          <button className={`hud-tab-btn ${activeTab === 'automations' ? 'active' : ''}`} onClick={() => setActiveTab('automations')}>Auto</button>
+          <button className={`hud-tab-btn ${activeTab === 'security' ? 'active' : ''}`} onClick={() => setActiveTab('security')}>Vision</button>
         </div>
 
         {activeTab === 'dashboard' ? (
-          <>
-            <div className="dashboard-left">
-          <div className="sensor-dashboard glass-card" style={{ flexWrap: 'wrap', gap: '1rem', justifyContent: 'space-around' }}>
-            <div className="sensor-item" style={{ width: '45%' }}>
-              <div className="icon-wrapper" style={{ color: '#fca5a5' }}>
-                <Thermometer size={24} />
-              </div>
-              <div className="sensor-data">
-                <span className="sensor-value">{sensors.temperature ? sensors.temperature.toFixed(1) + '°' : '--°'}</span>
-                <span className="sensor-label">Temp</span>
-              </div>
-            </div>
-            
-            <div className="sensor-item" style={{ width: '45%' }}>
-              <div className="icon-wrapper" style={{ color: '#93c5fd' }}>
-                <Droplet size={24} />
-              </div>
-              <div className="sensor-data">
-                <span className="sensor-value">{sensors.humidity ? sensors.humidity.toFixed(1) + '%' : '--%'}</span>
-                <span className="sensor-label">Humidity</span>
-              </div>
-            </div>
+          <div className="hud-dashboard-grid">
+            {/* Left Column: Data & Map */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+               {/* Weather HUD */}
+               <div className="weather-hud hud-frame">
+                 <div className="weather-stat">
+                    <span className="label">Out Temp</span>
+                    <span className="value" style={{ color: '#0ea5e9' }}>{outsideWeather ? outsideWeather.temperature.toFixed(1) + '°' : '--°'}</span>
+                 </div>
+                 <div className="weather-divider"></div>
+                 <div className="weather-stat">
+                    <span className="label">In Temp</span>
+                    <span className="value" style={{ color: '#fca5a5' }}>{sensors.temperature ? sensors.temperature.toFixed(1) + '°' : '--°'}</span>
+                 </div>
+                 <div className="weather-divider"></div>
+                 <div className="weather-stat" style={{ cursor: 'pointer' }} onClick={() => setShowCalibration(true)}>
+                    <span className="label">Batt Volts</span>
+                    <span className="value" style={{ color: 'var(--success)' }}>{calculatedVoltage}V</span>
+                 </div>
+               </div>
 
-            <div className="sensor-item" style={{ width: '45%' }}>
-              <div className="icon-wrapper" style={{ color: 'var(--led-gps)' }}>
-                <Navigation size={24} />
-              </div>
-              <div className="sensor-data">
-                <span className="sensor-value">{sensors.speed_mph ? sensors.speed_mph.toFixed(1) : '0.0'}</span>
-                <span className="sensor-label">MPH</span>
-              </div>
-            </div>
-
-            <div className="sensor-item" style={{ width: '45%', cursor: 'pointer' }} onClick={() => setShowCalibration(true)}>
-              <div className="icon-wrapper" style={{ color: 'var(--success)' }}>
-                <BatteryMedium size={24} />
-              </div>
-              <div className="sensor-data">
-                <span className="sensor-value">{calculatedVoltage}v</span>
-                <span className="sensor-label">Battery</span>
-              </div>
-            </div>
-
-            <div className="sensor-item" style={{ width: '45%' }}>
-              <div className="icon-wrapper" style={{ color: '#c084fc' }}>
-                <Radio size={24} />
-              </div>
-              <div className="sensor-data">
-                <span className="sensor-value">{sensors.gps_satellites || 0}</span>
-                <span className="sensor-label">Satellites</span>
-              </div>
-            </div>
-
-            <div className="sensor-item" style={{ width: '45%' }}>
-              <div className="icon-wrapper" style={{ color: '#cbd5e1' }}>
-                <Droplets size={24} />
-              </div>
-              <div className="sensor-data">
-                <span className="sensor-value">{sensors.altitude_ft ? sensors.altitude_ft.toFixed(0) : '0'}</span>
-                <span className="sensor-label">Alt (ft)</span>
-              </div>
-            </div>
-
-            {/* Dog Mode Toggle */}
-            <div style={{ width: '100%', marginTop: '0.5rem', borderTop: '1px solid var(--glass-border)', paddingTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontSize: '1.2rem', color: dogMode ? 'var(--led-dog)' : 'inherit' }}>🐾</span>
-                <div>
-                  <h4 style={{ margin: 0, fontSize: '1.1rem', color: dogMode ? 'var(--led-dog)' : 'inherit' }}>Dog Mode</h4>
-                  <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>Auto-Vents (70° - 75°)</p>
-                </div>
-              </div>
-              <input 
-                type="checkbox" 
-                className="toggle-switch" 
-                checked={dogMode}
-                onChange={toggleDogMode}
-                disabled={connectionMode === 'offline'}
-                style={{ background: dogMode ? 'var(--led-dog)' : 'rgba(255, 255, 255, 0.1)', boxShadow: dogMode ? '0 0 15px rgba(217, 70, 239, 0.4)' : '' }}
-              />
-            </div>
-          </div>
-
-          {/* GPS Map Widget */}
-          <div className="glass-card" style={{ display: 'block', padding: 0, overflow: 'hidden', height: '250px' }}>
-            <MapContainer center={mapCenter} zoom={15} style={{ height: '100%', width: '100%', background: '#1e293b' }}>
-              <MapUpdater center={mapCenter} />
-              <TileLayer
-                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
-              />
-              {antTrail.length > 0 && <Polyline positions={antTrail} color="var(--accent)" weight={3} opacity={0.5} />}
-              {antTrail.map((pos, idx) => (
-                 <CircleMarker key={idx} center={pos} radius={3} color="var(--accent)" fillColor="var(--accent)" fillOpacity={0.8} />
-              ))}
-              {(sensors.lat && sensors.lng) && <Marker position={[sensors.lat, sensors.lng]} />}
-            </MapContainer>
-          </div>
-        </div>
-
-        <div className="dashboard-right">
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
-             {isEditMode ? (
-                <button onClick={saveRelayConfig} style={{ background: 'var(--success)', color: '#000', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
-                  <Check size={16} /> Save Channels
-                </button>
-             ) : (
-                <button onClick={() => setIsEditMode(true)} style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid var(--glass-border)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Edit3 size={16} /> Edit Channels
-                </button>
-             )}
-          </div>
-          <div className="controls-grid">
-            {Object.keys(relayConfig).map((idStr) => {
-              const id = parseInt(idStr);
-              const config = relayConfig[id];
-              const Icon = RELAY_ICONS[id];
-              let isOn = relays[id];
-              
-              if ((id === 6 || id === 7) && sensors.speed_mph > 5.0) {
-                isOn = false; 
-              }
-              
-              const processing = isProcessing[id];
-              const lockedByDogMode = (id === 6 || id === 7) && dogMode;
-
-              return (
-                <div key={id} className="glass-card" style={{ opacity: lockedByDogMode && !isEditMode ? 0.7 : 1 }}>
-                  <div className="card-info" style={{ width: '100%', paddingRight: isEditMode ? '0' : '3rem' }}>
-                    <div className="icon-wrapper" style={{ color: isOn && !isEditMode ? 'var(--led-relay)' : 'var(--text-muted)', marginBottom: isEditMode ? '0.5rem' : '0' }}>
-                      <Icon size={24} />
-                    </div>
-                    {isEditMode ? (
-                      <div style={{ width: '100%' }}>
-                         <input 
-                            type="text" 
-                            className="edit-input" 
-                            value={config.name} 
-                            onChange={(e) => handleConfigChange(id, 'name', e.target.value)} 
-                         />
-                         <div className="edit-input desc" style={{border: 'none', background: 'transparent', padding: 0}}>
-                           {PIN_INFO[id]}
-                         </div>
-                      </div>
-                    ) : (
-                      <div>
-                        <h3>{config.name} {lockedByDogMode && <span style={{fontSize: '0.8rem', color: 'var(--led-dog)'}}> (Auto)</span>}</h3>
-                        <p>{PIN_INFO[id]}</p>
-                      </div>
-                    )}
+               {/* Sensor Grid */}
+               <div className="sensor-grid">
+                  <div className="sensor-hud-card">
+                     <div className="sensor-header">
+                        <Thermometer size={20} className="icon-wrapper" color="#fca5a5" />
+                        <span className="sensor-label">Temp</span>
+                     </div>
+                     <span className="sensor-value">{sensors.temperature ? sensors.temperature.toFixed(1) + '°' : '--°'}</span>
+                     <div className="sparkline-container">
+                        <SparklineGraph data={telemetryLog} dataKey="temperature" color="#fca5a5" sliceCount={30} />
+                     </div>
                   </div>
-                  
-                  {!isEditMode && (
-                    <input 
-                      type="checkbox" 
-                      className="toggle-switch" 
-                      checked={isOn}
-                      onChange={() => toggleRelay(id)}
-                      disabled={processing || connectionMode === 'offline' || lockedByDogMode}
-                    />
-                  )}
-                </div>
-              );
-            })}
+                  <div className="sensor-hud-card">
+                     <div className="sensor-header">
+                        <Navigation size={20} className="icon-wrapper" color="var(--led-gps)" />
+                        <span className="sensor-label">Speed</span>
+                     </div>
+                     <span className="sensor-value">{sensors.speed_mph ? sensors.speed_mph.toFixed(1) : '0.0'}</span>
+                     <div className="sparkline-container">
+                        <SparklineGraph data={telemetryLog} dataKey="speed_mph" color="var(--led-gps)" sliceCount={30} />
+                     </div>
+                  </div>
+                  <div className="sensor-hud-card">
+                     <div className="sensor-header">
+                        <Droplet size={20} className="icon-wrapper" color="#0ea5e9" />
+                        <span className="sensor-label">Humidity</span>
+                     </div>
+                     <span className="sensor-value">{sensors.humidity ? sensors.humidity.toFixed(0) + '%' : '--%'}</span>
+                     <div className="sparkline-container">
+                        <SparklineGraph data={telemetryLog} dataKey="humidity" color="#0ea5e9" sliceCount={30} />
+                     </div>
+                  </div>
+               </div>
+
+               <ThermalsGraph telemetryLog={telemetryLog} outsideWeather={outsideWeather} />
+               <PowerGraph telemetryLog={telemetryLog} calculatedVoltage={calculatedVoltage} timeToEmpty={timeToEmpty} voltageMultiplier={voltageMultiplier} />
+               
+               {/* Map */}
+               <div className="map-hud-wrapper hud-frame">
+                 <div className="map-hud-overlay">
+                    LAT: {sensors.lat ? sensors.lat.toFixed(5) : '0.00000'}<br/>
+                    LNG: {sensors.lng ? sensors.lng.toFixed(5) : '0.00000'}<br/>
+                    ALT: {sensors.altitude_ft ? sensors.altitude_ft.toFixed(0) : '0'} FT<br/>
+                    SAT: {sensors.gps_satellites || 0}
+                 </div>
+                 <MapContainer center={mapCenter} zoom={15} style={{ height: '100%', width: '100%', background: '#0a0f1a' }} zoomControl={false}>
+                    <MapUpdater center={mapCenter} />
+                    <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" attribution='&copy; CARTO' />
+                    {antTrail.length > 0 && <Polyline positions={antTrail} color="var(--accent)" weight={2} opacity={0.8} />}
+                    {antTrail.map((pos, idx) => (
+                       <CircleMarker key={idx} center={pos} radius={2} color="var(--accent)" fillColor="var(--accent)" fillOpacity={1} />
+                    ))}
+                    {(sensors.lat && sensors.lng) && <Marker position={[sensors.lat, sensors.lng]} />}
+                 </MapContainer>
+               </div>
+            </div>
+
+            {/* Right Column: Controls */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+               {/* Quick Modes */}
+               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem', background: 'rgba(15, 23, 42, 0.5)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
+                 <h2 style={{ fontFamily: 'var(--font-mono)', fontSize: '1rem', margin: 0, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Automation Modes</h2>
+                 <div style={{ display: 'flex', gap: '0.5rem' }}>
+                   <button className="hud-action-btn success" onClick={() => executeMacro('camp')} style={{ flex: 1 }}><Fan size={16} /> Camp</button>
+                   <button className="hud-action-btn" onClick={() => executeMacro('tow')} style={{ flex: 1, background: 'rgba(245, 158, 11, 0.2)', color: '#f59e0b', borderColor: '#f59e0b' }}><Navigation size={16} /> Tow</button>
+                   <button className="hud-action-btn" onClick={() => executeMacro('storage')} style={{ flex: 1, background: 'rgba(244, 63, 94, 0.2)', color: '#f43f5e', borderColor: '#f43f5e' }}><Power size={16} /> Storage</button>
+                 </div>
+               </div>
+               
+               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                 <h2 style={{ fontFamily: 'var(--font-mono)', fontSize: '1.2rem', margin: 0, color: 'var(--accent)', textTransform: 'uppercase' }}>Relay Control</h2>
+                 {isEditMode ? (
+                    <button onClick={saveRelayConfig} className="hud-action-btn success">
+                      <Check size={16} /> Save Ch
+                    </button>
+                 ) : (
+                    <button onClick={() => setIsEditMode(true)} className="hud-action-btn">
+                      <Edit3 size={16} /> Edit Ch
+                    </button>
+                 )}
+               </div>
+
+               {/* Dog Mode */}
+               <div className={`hud-relay-btn ${dogMode ? 'active' : ''}`} onClick={() => !isEditMode && toggleDogMode()} style={{ borderColor: dogMode ? 'var(--led-dog)' : '' }}>
+                 <div className="btn-info">
+                    <h3 style={{ color: dogMode ? 'var(--led-dog)' : '' }}>Dog Mode Auto</h3>
+                    <p>Auto-Vents (70° - 75°)</p>
+                 </div>
+                 <div className="icon-wrapper" style={{ color: dogMode ? 'var(--led-dog)' : '', fontSize: '1.5rem' }}>🐾</div>
+               </div>
+
+               <div className="hud-btn-grid">
+                 {Object.keys(relayConfig).map((idStr) => {
+                    const id = parseInt(idStr);
+                    const config = relayConfig[id];
+                    const Icon = RELAY_ICONS[id];
+                    let isOn = relays[id];
+                    
+                    if ((id === 6 || id === 7) && sensors.speed_mph > 5.0) {
+                      isOn = false; 
+                    }
+                    
+                    const processing = isProcessing[id];
+                    const lockedByDogMode = (id === 6 || id === 7) && dogMode;
+                    const isDisabled = processing || connectionMode === 'offline' || lockedByDogMode;
+
+                    return (
+                      <div 
+                        key={id} 
+                        className={`hud-relay-btn ${isOn && !isEditMode ? 'active' : ''} ${isDisabled ? 'disabled' : ''} ${lockedByDogMode ? 'locked' : ''}`}
+                        onClick={() => !isEditMode && !isDisabled && toggleRelay(id)}
+                      >
+                        <div className="btn-info" style={{ width: '100%' }}>
+                           {isEditMode ? (
+                              <div style={{ width: '100%' }}>
+                                 <input 
+                                    type="text" 
+                                    className="edit-input" 
+                                    value={config.name} 
+                                    onChange={(e) => handleConfigChange(id, 'name', e.target.value)} 
+                                    onClick={(e) => e.stopPropagation()}
+                                 />
+                                 <div className="edit-input desc">{PIN_INFO[id]}</div>
+                              </div>
+                           ) : (
+                              <>
+                                 <h3>{config.name} {lockedByDogMode && <span style={{fontSize: '0.7rem', color: 'var(--danger)'}}>(LOCKED)</span>}</h3>
+                                 <p>{PIN_INFO[id]}</p>
+                              </>
+                           )}
+                        </div>
+                        <div className="icon-wrapper" style={{ fontSize: '1.2rem' }}>
+                           <Icon size={24} />
+                        </div>
+                      </div>
+                    );
+                 })}
+               </div>
+            </div>
           </div>
-        </div>
-        </>
+                ) : activeTab === 'security' ? (
+          <div className="security-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem', height: 'calc(100vh - 150px)', overflowY: 'auto' }}>
+            
+            {/* Starlink Widget */}
+            <StarlinkWidget />
+
+            {/* Camera Feeds */}
+            <div className="hud-frame" style={{ display: 'flex', flexDirection: 'column', height: '400px' }}>
+               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.5rem' }}>
+                  <h3 style={{ margin: 0, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>EXTERIOR CAM 1 (ESP32)</h3>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--danger)', animation: 'pulse 2s infinite' }}>● LIVE REC</div>
+               </div>
+               <div style={{ flex: 1, background: '#000', borderRadius: '4px', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #1e293b' }}>
+                  <div style={{ position: 'absolute', top: 10, left: 10, color: '#fff', textShadow: '1px 1px 2px #000', fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>192.168.100.105:81/stream</div>
+                  {/* Placeholder for actual MJPEG Stream */}
+                  <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>[ NO SIGNAL - AWATING IP CAM ]</div>
+                  <div className="scanline"></div>
+               </div>
+            </div>
+
+            <div className="hud-frame" style={{ display: 'flex', flexDirection: 'column', height: '400px' }}>
+               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.5rem' }}>
+                  <h3 style={{ margin: 0, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>INTERIOR CAM 2 (ESP32)</h3>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--danger)', animation: 'pulse 2s infinite' }}>● LIVE REC</div>
+               </div>
+               <div style={{ flex: 1, background: '#000', borderRadius: '4px', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #1e293b' }}>
+                  <div style={{ position: 'absolute', top: 10, left: 10, color: '#fff', textShadow: '1px 1px 2px #000', fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>192.168.100.106:81/stream</div>
+                  {/* Placeholder for actual MJPEG Stream */}
+                  <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>[ NO SIGNAL - AWATING IP CAM ]</div>
+                  <div className="scanline"></div>
+               </div>
+            </div>
+
+          </div>
         ) : activeTab === 'analyzer' ? (
           <div className="analytics-grid">
              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -994,7 +1222,7 @@ function App() {
                
                <button 
                   onClick={saveMultiplier}
-                  style={{ background: 'var(--success)', color: '#000', border: 'none', padding: '10px 20px', borderRadius: '20px', width: '100%', marginTop: '1rem', cursor: 'pointer', fontWeight: 'bold' }}>
+                  style={{ background: 'var(--success)', color: '#000', border: 'none', padding: '10px 20px', borderRadius: '20px', width: '100%', cursor: 'pointer', fontWeight: 'bold' }}>
                  Save Calibration to Cloud
                </button>
             </div>

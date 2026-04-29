@@ -58,6 +58,9 @@ void setup() {
   Serial.begin(9600);
   Serial1.begin(9600); // GPS
   
+  // Set ADC to 12-bit for higher precision voltage reading (0-4095)
+  analogReadResolution(12);
+  
   for (int i = 0; i < NUM_RELAYS; i++) {
     pinMode(relayPins[i], OUTPUT);
     digitalWrite(relayPins[i], ACTIVE_HIGH ? LOW : HIGH);
