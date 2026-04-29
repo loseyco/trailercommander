@@ -146,7 +146,7 @@ function ThermalsGraph({ telemetryLog, outsideWeather }) {
           <ComposedChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
             <XAxis dataKey="time" stroke="#64748b" fontSize={10} tickMargin={5} />
-            <YAxis yAxisId="temp" domain={['dataMin - 5', 'dataMax + 5']} stroke="#64748b" fontSize={10} />
+            <YAxis yAxisId="temp" domain={[dataMin => Math.min(dataMin - 5, 0), dataMax => Math.max(dataMax + 5, 75)]} stroke="#64748b" fontSize={10} />
             <YAxis yAxisId="fans" domain={[0, 4]} hide />
             <Tooltip contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: '1px solid rgba(14, 165, 233, 0.3)', borderRadius: '4px', fontFamily: 'var(--font-mono)' }} />
             
