@@ -52,6 +52,17 @@ void setup() {
   WiFiDrv::pinMode(27, OUTPUT); 
   setRgbLed(0, 0, 0);
 
+  // Unused Pins Monitor setup
+  pinMode(A0, INPUT);
+  pinMode(A2, INPUT);
+  pinMode(A3, INPUT);
+  pinMode(A4, INPUT);
+  pinMode(A5, INPUT);
+  pinMode(A6, INPUT);
+  pinMode(8, INPUT);
+  pinMode(9, INPUT);
+  pinMode(10, INPUT);
+
   if (!sht31.begin(0x44)) {
     Serial.println("Couldn't find SHT31");
   } else {
@@ -115,6 +126,17 @@ String getSensorJson() {
   // Output raw ADC value (0-1023) so the UI can calibrate it
   int adc = analogRead(A1);
   json += ",\"raw_voltage\":" + String(adc);
+  
+  // Unused Pin Monitoring
+  json += ",\"a0\":" + String(analogRead(A0));
+  json += ",\"a2\":" + String(analogRead(A2));
+  json += ",\"a3\":" + String(analogRead(A3));
+  json += ",\"a4\":" + String(analogRead(A4));
+  json += ",\"a5\":" + String(analogRead(A5));
+  json += ",\"a6\":" + String(analogRead(A6));
+  json += ",\"d8\":" + String(digitalRead(8));
+  json += ",\"d9\":" + String(digitalRead(9));
+  json += ",\"d10\":" + String(digitalRead(10));
 
   if (gps.speed.isValid()) {
     json += ",\"speed_mph\":" + String(gps.speed.mph());
@@ -190,6 +212,17 @@ void postToFirestore() {
     
     int adc = analogRead(A1);
     payload += "\"raw_voltage\":{\"doubleValue\":" + String(adc) + "}";
+
+    // Unused Pins Monitoring
+    payload += ",\"a0\":{\"doubleValue\":" + String(analogRead(A0)) + "}";
+    payload += ",\"a2\":{\"doubleValue\":" + String(analogRead(A2)) + "}";
+    payload += ",\"a3\":{\"doubleValue\":" + String(analogRead(A3)) + "}";
+    payload += ",\"a4\":{\"doubleValue\":" + String(analogRead(A4)) + "}";
+    payload += ",\"a5\":{\"doubleValue\":" + String(analogRead(A5)) + "}";
+    payload += ",\"a6\":{\"doubleValue\":" + String(analogRead(A6)) + "}";
+    payload += ",\"d8\":{\"booleanValue\":" + String(digitalRead(8) ? "true" : "false") + "}";
+    payload += ",\"d9\":{\"booleanValue\":" + String(digitalRead(9) ? "true" : "false") + "}";
+    payload += ",\"d10\":{\"booleanValue\":" + String(digitalRead(10) ? "true" : "false") + "}";
     
     if (sensorEnabled) {
       float t_f = (sht31.readTemperature() * 9.0 / 5.0) + 32.0;

@@ -89,12 +89,18 @@ function MKR1010Diag({ relays, sensors }) {
   );
 }
 
-function SparklineGraph({ data, dataKey, color, isStepped = false }) {
-  const chartData = data.slice(0, 15).reverse();
+function SparklineGraph({ data, dataKey, color, isStepped = false, sliceCount }) {
+  const chartData = data.slice(0, sliceCount).reverse();
   return (
-    <div style={{ width: '100%', height: '40px' }}>
+    <div style={{ width: '100%', height: '40px', position: 'relative' }}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData}>
+          <Tooltip 
+             contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '4px', padding: '2px 6px', fontSize: '0.8rem' }}
+             itemStyle={{ color: '#fff' }}
+             labelStyle={{ display: 'none' }}
+             formatter={(value) => [value, dataKey]}
+          />
           <Line 
             type={isStepped ? "stepAfter" : "monotone"} 
             dataKey={dataKey} 
@@ -128,6 +134,7 @@ function App() {
 
   // Tabs & Analytics
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [timeScale, setTimeScale] = useState(12); // 12 = 60s, 60 = 5m, 180 = 15m
   const [telemetryLog, setTelemetryLog] = useState([]);
   const [stats, setStats] = useState({ max_speed_mph: 0, high_voltage: 0, low_voltage: 99 });
   const [timeToEmpty, setTimeToEmpty] = useState(null);
@@ -655,9 +662,52 @@ function App() {
         </>
         ) : activeTab === 'analyzer' ? (
           <div className="analytics-grid" style={{ maxWidth: '800px', margin: '0 auto' }}>
-             <h2 style={{ marginBottom: '1rem', marginTop: 0 }}>Active Pin Status (60s Timeline)</h2>
+             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h2 style={{ margin: 0 }}>Active Pin Status</h2>
+                <select 
+                   value={timeScale} 
+                   onChange={(e) => setTimeScale(parseInt(e.target.value))}
+                   style={{ background: '#1e293b', color: '#fff', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '0.5rem' }}
+                >
+                   <option value={12}>Last 60 Seconds</option>
+                   <option value={60}>Last 5 Minutes</option>
+                   <option value={180}>Last 15 Minutes</option>
+                </select>
+             </div>
              
              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '2rem' }}>
+                {/* Dynamically mapped unused analog pins */}
+                {['a0', 'a2', 'a3', 'a4', 'a5', 'a6'].map(pin => (
+                   <div key={pin} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--glass-border)', paddingBottom: '1rem' }}>
+                      <div style={{ width: '200px' }}>
+                         <h4 style={{ margin: '0 0 4px 0', color: 'var(--text-muted)' }}>Pin {pin.toUpperCase()}</h4>
+                         <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>Analog In</div>
+                         <div style={{ color: '#94a3b8', fontSize: '0.9rem', marginTop: '4px' }}>
+                            {sensors[pin] !== undefined ? sensors[pin] : '0'} (Raw)
+                         </div>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                         <SparklineGraph data={telemetryLog.map(l => ({...l, [pin]: l[pin] || 0}))} dataKey={pin} color="#94a3b8" sliceCount={timeScale} />
+                      </div>
+                   </div>
+                ))}
+                
+                {/* Dynamically mapped unused digital pins */}
+                {['d8', 'd9', 'd10'].map(pin => (
+                   <div key={pin} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--glass-border)', paddingBottom: '1rem' }}>
+                      <div style={{ width: '200px' }}>
+                         <h4 style={{ margin: '0 0 4px 0', color: 'var(--text-muted)' }}>Pin {pin.toUpperCase()}</h4>
+                         <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>Digital In</div>
+                         <div style={{ color: '#94a3b8', fontSize: '0.9rem', marginTop: '4px' }}>
+                            {sensors[pin] ? 'HIGH (1)' : 'LOW (0)'}
+                         </div>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                         <SparklineGraph data={telemetryLog.map(l => ({...l, [pin]: l[pin] ? 1 : 0}))} dataKey={pin} color="#94a3b8" isStepped={true} sliceCount={timeScale} />
+                      </div>
+                   </div>
+                ))}
+
                 {Object.keys(relayConfig).map(idStr => {
                    const id = parseInt(idStr);
                    const isRelayOn = relays[id];
@@ -673,7 +723,7 @@ function App() {
                            </div>
                         </div>
                         <div style={{ flex: 1 }}>
-                           <SparklineGraph data={sparkData} dataKey="relayValue" color={isRelayOn ? 'var(--led-relay)' : '#475569'} isStepped={true} />
+                           <SparklineGraph data={sparkData} dataKey="relayValue" color={isRelayOn ? 'var(--led-relay)' : '#475569'} isStepped={true} sliceCount={timeScale} />
                         </div>
                      </div>
                    );
@@ -688,7 +738,7 @@ function App() {
                       </div>
                    </div>
                    <div style={{ flex: 1 }}>
-                      <SparklineGraph data={telemetryLog.map(log => ({ ...log, raw_voltage: log.raw_voltage ? (log.raw_voltage/1023.0)*3.3*voltageMultiplier : 0 }))} dataKey="raw_voltage" color="var(--success)" />
+                      <SparklineGraph data={telemetryLog.map(log => ({ ...log, raw_voltage: log.raw_voltage ? (log.raw_voltage/1023.0)*3.3*voltageMultiplier : 0 }))} dataKey="raw_voltage" color="var(--success)" sliceCount={timeScale} />
                    </div>
                 </div>
 
@@ -701,7 +751,7 @@ function App() {
                       </div>
                    </div>
                    <div style={{ flex: 1 }}>
-                      <SparklineGraph data={telemetryLog} dataKey="speed_mph" color="var(--led-gps)" />
+                      <SparklineGraph data={telemetryLog} dataKey="speed_mph" color="var(--led-gps)" sliceCount={timeScale} />
                    </div>
                 </div>
                 
@@ -714,7 +764,7 @@ function App() {
                       </div>
                    </div>
                    <div style={{ flex: 1 }}>
-                      <SparklineGraph data={telemetryLog} dataKey="temperature" color="#fca5a5" />
+                      <SparklineGraph data={telemetryLog} dataKey="temperature" color="#fca5a5" sliceCount={timeScale} />
                    </div>
                 </div>
 
