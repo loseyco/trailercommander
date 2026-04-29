@@ -165,6 +165,12 @@ String getSensorJson() {
   if (gps.location.isValid()) {
     json += ",\"lat\":" + String(gps.location.lat(), 6) + ",\"lng\":" + String(gps.location.lng(), 6);
   }
+  if (gps.satellites.isValid()) {
+    json += ",\"gps_satellites\":" + String(gps.satellites.value());
+  }
+  if (gps.altitude.isValid()) {
+    json += ",\"altitude_ft\":" + String(gps.altitude.feet());
+  }
   json += ",\"dog_mode\":\"" + String(dogModeEnabled ? "on" : "off") + "\"";
   json += "}";
   return json;
@@ -255,6 +261,12 @@ void postToFirestore() {
     }
     if (gps.speed.isValid()) {
       payload += ",\"speed_mph\":{\"doubleValue\":" + String(gps.speed.mph()) + "}";
+    }
+    if (gps.satellites.isValid()) {
+      payload += ",\"gps_satellites\":{\"integerValue\":\"" + String(gps.satellites.value()) + "\"}";
+    }
+    if (gps.altitude.isValid()) {
+      payload += ",\"altitude_ft\":{\"doubleValue\":" + String(gps.altitude.feet()) + "}";
     }
     
     payload += ",\"uptime_seconds\":{\"integerValue\":\"" + String(millis() / 1000) + "\"}";

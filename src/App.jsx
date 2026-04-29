@@ -127,7 +127,7 @@ function App() {
   const [connectionMode, setConnectionMode] = useState('offline'); 
   const [toastMessage, setToastMessage] = useState('');
   
-  const [sensors, setSensors] = useState({ temperature: null, humidity: null, speed_mph: 0.0, raw_voltage: 0, lat: 0, lng: 0 });
+  const [sensors, setSensors] = useState({ temperature: null, humidity: null, speed_mph: 0.0, raw_voltage: 0, lat: 0, lng: 0, gps_satellites: 0, altitude_ft: 0 });
   const [dogMode, setDogMode] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [showCalibration, setShowCalibration] = useState(false);
@@ -233,7 +233,9 @@ function App() {
               speed_mph: data.speed_mph || prev.speed_mph,
               raw_voltage: data.raw_voltage || prev.raw_voltage,
               lat: data.lat || prev.lat,
-              lng: data.lng || prev.lng
+              lng: data.lng || prev.lng,
+              gps_satellites: data.gps_satellites || prev.gps_satellites,
+              altitude_ft: data.altitude_ft || prev.altitude_ft
             }));
             if (data.dog_mode !== undefined) setDogMode(data.dog_mode);
             
@@ -601,6 +603,26 @@ function App() {
               <div className="sensor-data">
                 <span className="sensor-value">{calculatedVoltage}v</span>
                 <span className="sensor-label">Battery</span>
+              </div>
+            </div>
+
+            <div className="sensor-item" style={{ width: '45%' }}>
+              <div className="icon-wrapper" style={{ color: '#c084fc' }}>
+                <Radio size={24} />
+              </div>
+              <div className="sensor-data">
+                <span className="sensor-value">{sensors.gps_satellites || 0}</span>
+                <span className="sensor-label">Satellites</span>
+              </div>
+            </div>
+
+            <div className="sensor-item" style={{ width: '45%' }}>
+              <div className="icon-wrapper" style={{ color: '#cbd5e1' }}>
+                <Droplets size={24} />
+              </div>
+              <div className="sensor-data">
+                <span className="sensor-value">{sensors.altitude_ft ? sensors.altitude_ft.toFixed(0) : '0'}</span>
+                <span className="sensor-label">Alt (ft)</span>
               </div>
             </div>
 
