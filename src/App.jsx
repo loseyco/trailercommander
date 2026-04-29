@@ -362,24 +362,24 @@ function App() {
 
   useEffect(() => {
     const updateTimeStr = () => {
-      if (connectionMode === 'local' || connectionMode === 'mqtt') {
-        setTimeAgoStr('Live');
-        return;
-      }
       if (!lastUpdated) {
         setTimeAgoStr('Unknown');
         return;
       }
       const diffMs = Date.now() - lastUpdated;
       const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+      
       if (diffMins < 1) setTimeAgoStr('Just now');
       else if (diffMins < 60) setTimeAgoStr(`${diffMins}m ago`);
-      else setTimeAgoStr(`${Math.floor(diffMins/60)}h ${diffMins%60}m ago`);
+      else if (diffHours < 24) setTimeAgoStr(`${diffHours}h ${diffMins % 60}m ago`);
+      else setTimeAgoStr(`${diffDays}d ${diffHours % 24}h ago`);
     };
     updateTimeStr();
     const interval = setInterval(updateTimeStr, 10000);
     return () => clearInterval(interval);
-  }, [lastUpdated, connectionMode]);
+  }, [lastUpdated]);
 
   useEffect(() => {
     if (sensors.lat && sensors.lng && sensors.lat !== 0) {
@@ -748,7 +748,7 @@ function App() {
              <h1 style={{ fontSize: '1.2rem', margin: 0 }}>TrailerCommander</h1>
           </div>
           <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            UPD: <span style={{ color: connectionMode !== 'offline' ? 'var(--success)' : 'var(--danger)' }}>{connectionMode !== 'offline' ? 'LIVE' : timeAgoStr}</span>
+            UPD: <span style={{ color: connectionMode !== 'offline' ? 'var(--success)' : 'var(--text-muted)' }}>{timeAgoStr}</span>
             <button className="icon-btn" onClick={() => setShowGuide(true)} style={{ marginLeft: '1rem' }}><Info size={18} /></button>
           </div>
         </div>
