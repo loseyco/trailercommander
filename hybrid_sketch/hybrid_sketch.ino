@@ -3,6 +3,7 @@
 #include <ArduinoMqttClient.h>
 #include <utility/wifi_drv.h>
 #include <Wire.h>
+#include <ArduinoOTA.h>
 #include "Adafruit_SHT31.h"
 #include <TinyGPS++.h>
 
@@ -78,6 +79,8 @@ void setup() {
   
   server.begin();
   connectToMqtt();
+  
+  ArduinoOTA.begin();
 }
 
 void setRgbLed(int r, int g, int b) {
@@ -268,6 +271,8 @@ void postToFirestore() {
 }
 
 void loop() {
+  ArduinoOTA.poll();
+  
   // Feed GPS
   while (Serial1.available() > 0) {
     gps.encode(Serial1.read());
